@@ -1,0 +1,13 @@
+node_modules
+dist
+build
+.next
+.turbo
+.vite
+coverage
+drizzle
+supabase/.branches
+supabase/.temp
+*.lock
+bun.lockb
+.claude/worktrees

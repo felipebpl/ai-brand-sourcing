@@ -1,0 +1,10 @@
+{
+  "recommendations": [
+    "esbenp.prettier-vscode",
+    "bradlc.vscode-tailwindcss",
+    "drizzle-team.drizzle-vscode",
+    "biomejs.biome",
+    "EditorConfig.EditorConfig",
+    "ms-azuretools.vscode-docker"
+  ]
+}
