@@ -5,7 +5,7 @@ import type {
   NegotiationRow,
   QuotationDetailResponse,
 } from '@/lib/api';
-import { money } from '@/lib/format';
+import { money, shortenPaymentTerms } from '@/lib/format';
 import type { AgentEvent } from '@/lib/sse';
 import { accentClasses, supplierMeta } from '@/lib/suppliers';
 import { formatRelative } from '@/lib/time';
@@ -234,7 +234,7 @@ function OfferChip({
         {offer.leadTimeDays}d
       </span>
       <span className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-2 py-0.5 font-mono text-foreground">
-        {offer.paymentTerms.display}
+        {shortenPaymentTerms(offer.paymentTerms)}
       </span>
       {offer.fulfillablePct < 1 ? (
         <span className="inline-flex items-center gap-1 rounded-md border border-attention/40 bg-attention/10 px-2 py-0.5 font-mono text-attention-foreground">

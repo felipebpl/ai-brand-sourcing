@@ -1,6 +1,6 @@
 import { ArrowDownCircle, CheckCircle2, History } from 'lucide-react';
 import type { QuotationDetailResponse } from '@/lib/api';
-import { money } from '@/lib/format';
+import { money, shortenPaymentTerms } from '@/lib/format';
 import { supplierMeta } from '@/lib/suppliers';
 import { cn } from '@/lib/utils';
 
@@ -177,7 +177,7 @@ function ComparisonGrid({
                 label="Fulfill"
                 value={`${Math.round((row.fulfillablePct ?? 1) * 100)}%`}
               />
-              <Metric label="Payment" value={row.paymentTerms.display} />
+              <Metric label="Payment" value={shortenPaymentTerms(row.paymentTerms)} />
               <Metric label="Total" value={money(row.totalCost)} />
             </div>
             {row.winsOn.length > 0 ? (

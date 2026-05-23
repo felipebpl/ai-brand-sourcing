@@ -10,7 +10,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
-import { delta, money } from '@/lib/format';
+import { delta, money, shortenPaymentTerms } from '@/lib/format';
 import { accentClasses, supplierMeta } from '@/lib/suppliers';
 import { formatRelative } from '@/lib/time';
 import { cn } from '@/lib/utils';
@@ -74,9 +74,9 @@ export function NegotiationMatrix({
 
   const supplierLatestPaymentDisplay = (n: NegotiationRow): string | null => {
     const o = latestSupplierOffer(n);
-    if (o?.paymentTerms?.display) return o.paymentTerms.display;
+    if (o?.paymentTerms) return shortenPaymentTerms(o.paymentTerms);
     const c = comparisonByNegId.get(n.id);
-    if (c?.paymentTerms?.display) return c.paymentTerms.display;
+    if (c?.paymentTerms) return shortenPaymentTerms(c.paymentTerms);
     return supplierMeta(n.supplierId).paymentTerms;
   };
 
@@ -464,7 +464,7 @@ function paramValue(m: NegotiationMessageRow, index: number): string | null {
   if (!m.offer) return null;
   if (index === 0) return `$${m.offer.unitPriceAvg.toFixed(2)}`;
   if (index === 1) return `${m.offer.leadTimeDays}d`;
-  if (index === 2) return m.offer.paymentTerms.display;
+  if (index === 2) return shortenPaymentTerms(m.offer.paymentTerms);
   return null;
 }
 
@@ -497,7 +497,7 @@ function TurnTooltip({
         <div className="mt-2 grid grid-cols-3 gap-1.5 font-mono text-[10px] tabular">
           <Param label="Unit" value={`$${message.offer.unitPriceAvg.toFixed(2)}`} />
           <Param label="Lead" value={`${message.offer.leadTimeDays}d`} />
-          <Param label="Payment" value={message.offer.paymentTerms.display} />
+          <Param label="Payment" value={shortenPaymentTerms(message.offer.paymentTerms)} />
         </div>
       ) : null}
       <p className="mt-2 text-[11.5px] leading-snug">{message.content}</p>

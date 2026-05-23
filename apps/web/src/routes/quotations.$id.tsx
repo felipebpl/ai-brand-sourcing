@@ -14,7 +14,7 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { api } from '@/lib/api';
 import { isSeedRfqId } from '@/lib/seed-rfq';
-import { useNegotiationStream } from '@/lib/sse';
+import { useStreamContext } from '@/lib/stream-context';
 
 export const Route = createFileRoute('/quotations/$id')({
   component: QuotationWorkspace,
@@ -45,7 +45,7 @@ function RealWorkspace({ id }: { id: string }) {
     },
   });
 
-  const { events } = useNegotiationStream(data ? id : undefined);
+  const { events } = useStreamContext();
 
   if (isLoading) {
     return <WorkspaceSkeleton />;

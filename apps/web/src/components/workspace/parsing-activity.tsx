@@ -11,19 +11,31 @@ type Props = {
   status: 'uploaded' | 'parsing';
 };
 
+type StepState = 'done' | 'active' | 'pending';
+
 type Step = {
   key: string;
   label: string;
   detail?: string;
-  state: 'done' | 'active' | 'pending';
+  state: StepState;
 };
 
+const STAGES: Array<{
+  key: string;
+  label: string;
+}> = [
+  { key: 'received', label: 'Quote received from the supplier' },
+  { key: 'opened', label: 'Picking up the file' },
+  { key: 'reading', label: 'Reading the workbook' },
+  { key: 'matching', label: 'Matching SKUs against the catalog' },
+  { key: 'handoff', label: 'Handing off to the negotiation engine' },
+];
+
 export function ParsingActivity({ events, lines, status }: Props) {
-  const steps = useMemo(() => buildSteps(events, lines, status), [
-    events,
-    lines,
-    status,
-  ]);
+  const steps = useMemo(
+    () => buildSteps(events, lines, status),
+    [events, lines, status],
+  );
 
   return (
     <div className="rounded-xl border border-border bg-card">
@@ -36,7 +48,7 @@ export function ParsingActivity({ events, lines, status }: Props) {
           Parsing in flight
         </h2>
         <p className="mt-1 text-[12.5px] text-muted-foreground">
-          Open the file, find the products table, match every SKU against your
+          Open the file, find the products table, match every SKU against the
           catalog, normalize prices. We'll start the negotiation as soon as the
           extraction is finalized.
         </p>
@@ -120,7 +132,7 @@ export function ParsingActivity({ events, lines, status }: Props) {
   );
 }
 
-function StepIcon({ state }: { state: Step['state'] }) {
+function StepIcon({ state }: { state: StepState }) {
   if (state === 'done') {
     return <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-success" />;
   }
@@ -134,10 +146,84 @@ function StepIcon({ state }: { state: Step['state'] }) {
   );
 }
 
-function describeToolStep(
-  toolName: string,
-  input: unknown,
-): { key: string; label: string; detail?: string } {
+function buildSteps(
+  events: AgentEvent[],
+  lines: QuotationLineRow[],
+  status: Props['status'],
+): Step[] {
+  const completed = events.some((e) => e.kind === 'parser.completed');
+  const hasLines = lines.length > 0;
+  const isParsing = status === 'parsing';
+
+  const latestToolHint = liveToolHint(events);
+  const isMatching = isMatchingSkus(events);
+  const isReading = isReadingWorkbook(events);
+
+  const STATE: Record<string, StepState> = {
+    received: 'done',
+    opened: 'done',
+    reading: completed || hasLines ? 'done' : isParsing ? 'active' : 'pending',
+    matching: completed
+      ? 'done'
+      : hasLines || isMatching
+      ? 'active'
+      : 'pending',
+    handoff: completed ? 'done' : 'pending',
+  };
+
+  return STAGES.map((s) => ({
+    key: s.key,
+    label: s.label,
+    detail:
+      s.key === 'reading' && STATE.reading === 'active' && isReading
+        ? latestToolHint
+        : s.key === 'matching' && STATE.matching === 'active' && !isReading
+        ? latestToolHint
+        : undefined,
+    state: STATE[s.key] ?? 'pending',
+  }));
+}
+
+function liveToolHint(events: AgentEvent[]): string | undefined {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const e = events[i];
+    if (!e) continue;
+    if (e.kind !== 'brand.thinking') continue;
+    const payload = e.payload as {
+      phase?: string;
+      toolName?: string;
+      toolInput?: unknown;
+    };
+    if (payload.phase !== 'pre_tool_use') continue;
+    const hint = toolHint(payload.toolName ?? '', payload.toolInput);
+    if (hint) return hint;
+  }
+  return undefined;
+}
+
+function isMatchingSkus(events: AgentEvent[]): boolean {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const e = events[i];
+    if (!e || e.kind !== 'brand.thinking') continue;
+    const payload = e.payload as { phase?: string; toolName?: string };
+    if (payload.phase !== 'pre_tool_use') continue;
+    return payload.toolName === 'mcp__parser__lookup_catalog';
+  }
+  return false;
+}
+
+function isReadingWorkbook(events: AgentEvent[]): boolean {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const e = events[i];
+    if (!e || e.kind !== 'brand.thinking') continue;
+    const payload = e.payload as { phase?: string; toolName?: string };
+    if (payload.phase !== 'pre_tool_use') continue;
+    return payload.toolName === 'Bash' || payload.toolName === 'Read';
+  }
+  return false;
+}
+
+function toolHint(toolName: string, input: unknown): string | undefined {
   const inputObj =
     input && typeof input === 'object'
       ? (input as Record<string, unknown>)
@@ -145,21 +231,14 @@ function describeToolStep(
 
   if (toolName === 'Bash') {
     const cmd = typeof inputObj.command === 'string' ? inputObj.command : '';
-    if (cmd.includes('wb.sheetnames'))
-      return { key: 'bash:sheets', label: 'Listing sheets in the workbook' };
-    if (cmd.includes('merged_cells'))
-      return { key: 'bash:merged', label: 'Resolving merged cells' };
-    if (cmd.includes('iter_rows'))
-      return { key: 'bash:rows', label: 'Scanning the products table' };
+    if (cmd.includes('wb.sheetnames')) return 'listing sheets';
+    if (cmd.includes('merged_cells')) return 'resolving merged cells';
+    if (cmd.includes('iter_rows')) return 'scanning the products table';
     if (cmd.includes('cell(') || cmd.includes('ws['))
-      return { key: 'bash:cells', label: 'Reading individual cells' };
-    return { key: 'bash:other', label: 'Looking through the file' };
+      return 'reading individual cells';
+    return 'looking through the file';
   }
-
-  if (toolName === 'Read') {
-    return { key: 'read', label: 'Reading the file structure' };
-  }
-
+  if (toolName === 'Read') return 'reading the file structure';
   if (toolName === 'mcp__parser__lookup_catalog') {
     const raw =
       typeof inputObj.rawSku === 'string'
@@ -167,108 +246,9 @@ function describeToolStep(
         : typeof inputObj.sku === 'string'
         ? (inputObj.sku as string)
         : null;
-    return {
-      key: 'lookup_catalog',
-      label: 'Matching SKUs against the catalog',
-      detail: raw ? `looking up ${raw}` : undefined,
-    };
+    return raw ? `looking up ${raw}` : 'matching SKUs';
   }
-
-  if (toolName === 'mcp__parser__submit_extraction') {
-    return {
-      key: 'submit_extraction',
-      label: 'Finalizing the structured extraction',
-    };
-  }
-
-  return { key: `t:${toolName}`, label: humanizeUnknownTool(toolName) };
-}
-
-function buildSteps(
-  events: AgentEvent[],
-  lines: QuotationLineRow[],
-  status: Props['status'],
-): Step[] {
-  const completed = events.some((e) => e.kind === 'parser.completed');
-  const toolEvents = events.filter((e) => e.kind === 'brand.thinking');
-
-  // Each (toolName, optional detail) becomes its own step. We dedupe by
-  // (tool + detail) so repeated identical actions collapse, while
-  // different SKU lookups stay separate.
-  const seen = new Map<
-    string,
-    { label: string; detail?: string; latestPhase: string }
-  >();
-  for (const e of toolEvents) {
-    const payload = e.payload as {
-      phase?: string;
-      toolName?: string;
-      toolInput?: unknown;
-    };
-    const tool = payload.toolName ?? '';
-    if (!tool) continue;
-    const { key, label, detail } = describeToolStep(tool, payload.toolInput);
-    const stepKey = detail ? `${key}:${detail}` : key;
-    const existing = seen.get(stepKey);
-    if (existing) {
-      existing.latestPhase = payload.phase ?? existing.latestPhase;
-    } else {
-      seen.set(stepKey, {
-        label,
-        detail,
-        latestPhase: payload.phase ?? 'pre_tool_use',
-      });
-    }
-  }
-
-  const toolSteps: Step[] = [];
-  for (const [key, entry] of seen) {
-    toolSteps.push({
-      key: `tool:${key}`,
-      label: entry.label,
-      detail: entry.detail,
-      state: entry.latestPhase === 'post_tool_use' ? 'done' : 'active',
-    });
-  }
-
-  const head: Step[] = [
-    {
-      key: 'received',
-      label: 'Quote received from the supplier',
-      state: 'done',
-    },
-    {
-      key: 'starting',
-      label: 'Picking up the file',
-      state:
-        status === 'uploaded' && toolSteps.length === 0 ? 'active' : 'done',
-    },
-  ];
-
-  const tail: Step[] = [];
-  if (lines.length > 0 || completed) {
-    tail.push({
-      key: 'extracted',
-      label: `Extracted ${lines.length || '…'} line item${
-        lines.length === 1 ? '' : 's'
-      }`,
-      state: completed ? 'done' : lines.length > 0 ? 'active' : 'pending',
-    });
-  }
-  tail.push({
-    key: 'handoff',
-    label: 'Handing off to the negotiation engine',
-    state: completed ? 'done' : 'pending',
-  });
-
-  return [...head, ...toolSteps, ...tail];
-}
-
-function humanizeUnknownTool(name: string): string {
-  return (
-    name
-      .replace(/^mcp__[a-z_]+__/, '')
-      .replace(/_/g, ' ')
-      .replace(/\b\w/g, (c) => c.toUpperCase()) || 'Working'
-  );
+  if (toolName === 'mcp__parser__submit_extraction')
+    return 'finalizing the structured extraction';
+  return undefined;
 }

@@ -8,7 +8,7 @@ export type SupplierMeta = {
   leadTimeDays: number;
   paymentTerms: string;
   positioning: string;
-  accent: 'pink' | 'green' | 'purple' | 'amber';
+  accent: 'teal' | 'indigo' | 'coral';
 };
 
 export const SUPPLIERS: Record<string, SupplierMeta> = {
@@ -22,7 +22,7 @@ export const SUPPLIERS: Record<string, SupplierMeta> = {
     leadTimeDays: 50,
     paymentTerms: '33/33/33',
     positioning: 'Source supplier · cheapest baseline',
-    accent: 'amber',
+    accent: 'teal',
   },
   'supplier-2': {
     id: 'supplier-2',
@@ -34,7 +34,7 @@ export const SUPPLIERS: Record<string, SupplierMeta> = {
     leadTimeDays: 25,
     paymentTerms: '40/60',
     positioning: 'Premium · highest quality',
-    accent: 'pink',
+    accent: 'indigo',
   },
   'supplier-3': {
     id: 'supplier-3',
@@ -44,9 +44,9 @@ export const SUPPLIERS: Record<string, SupplierMeta> = {
     country: 'Cambodia',
     qualityScore: 4.0,
     leadTimeDays: 15,
-    paymentTerms: '100% upfront',
+    paymentTerms: '100% up',
     positioning: 'Speed-focused · 15d lead',
-    accent: 'green',
+    accent: 'coral',
   },
 };
 
@@ -62,7 +62,7 @@ export function supplierMeta(id: string): SupplierMeta {
       leadTimeDays: 0,
       paymentTerms: '',
       positioning: '',
-      accent: 'amber',
+      accent: 'teal',
     }
   );
 }
@@ -73,30 +73,24 @@ export function accentClasses(accent: SupplierMeta['accent']): {
   ring: string;
 } {
   switch (accent) {
-    case 'pink':
+    case 'indigo':
       return {
-        bg: 'bg-[oklch(0.93_0.06_350)]',
-        text: 'text-[oklch(0.42_0.16_350)]',
-        ring: 'ring-[oklch(0.78_0.13_350)]',
+        bg: 'bg-[oklch(0.93_0.05_255)]',
+        text: 'text-[oklch(0.36_0.16_255)]',
+        ring: 'ring-[oklch(0.65_0.16_255)]',
       };
-    case 'green':
+    case 'coral':
       return {
-        bg: 'bg-[oklch(0.93_0.08_155)]',
-        text: 'text-[oklch(0.38_0.14_155)]',
-        ring: 'ring-[oklch(0.72_0.16_155)]',
+        bg: 'bg-[oklch(0.92_0.06_30)]',
+        text: 'text-[oklch(0.45_0.16_30)]',
+        ring: 'ring-[oklch(0.72_0.16_30)]',
       };
-    case 'purple':
-      return {
-        bg: 'bg-[oklch(0.93_0.06_290)]',
-        text: 'text-[oklch(0.40_0.18_290)]',
-        ring: 'ring-[oklch(0.72_0.18_290)]',
-      };
-    case 'amber':
+    case 'teal':
     default:
       return {
-        bg: 'bg-[oklch(0.93_0.07_75)]',
-        text: 'text-[oklch(0.42_0.14_70)]',
-        ring: 'ring-[oklch(0.78_0.13_75)]',
+        bg: 'bg-[oklch(0.92_0.05_195)]',
+        text: 'text-[oklch(0.38_0.12_200)]',
+        ring: 'ring-[oklch(0.70_0.12_195)]',
       };
   }
 }
