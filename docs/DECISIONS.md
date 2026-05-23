@@ -272,6 +272,62 @@ because we want less agent. We want more focused agents.
 
 ---
 
+## ADR-014 — Parser validated against four sample quotations; no changes required
+
+**Status:** Accepted.
+
+**Decision:** The Step 3 parser subagent — `claude-sonnet-4-6` + the
+inline `quotation-parser` system prompt + `lookup_catalog` /
+`submit_extraction` MCP tools + the `stop-on-submit` hook — handles all
+four real-world variabilities present in the challenge sample files
+without modification. We ship this implementation as-is for Step 4 and
+beyond.
+
+**Validation summary** (full report in
+[PARSER-VALIDATION.md](PARSER-VALIDATION.md)):
+
+| File | Pattern | Outcome |
+|---|---|---|
+| quotation_1 | Tier pricing as duplicated rows; merged headers; empty col A; absent footer metadata | 40 lines, honest nulls for missing metadata, soft-signal ambiguity on L > XL pricing oddity |
+| quotation_2 | Tier pricing as separate columns; typo'd SKUs; footer metadata | 48 lines (2 tiers × 24 SKUs), typo SKUs fuzzy-matched with reasoning, 3 thin-margin candidates flagged as `agent_uncertain` |
+| quotation_3 | Multi-sheet (Quote 1 + Quote 2 scenarios); discount % per row; labeled metadata block | 46 lines merged with `sourceRef.sheet` provenance; discount applied to unit price; one unresolved SKU flagged |
+| quotation_4 | Chinese labels; **column order swapped vs labels** | 23 lines, swap detected via magnitude analysis, validated via grand-total reconciliation, `language: "zh"` tagged |
+
+**Key correctness wins:**
+
+- Honest absence (`null` instead of inventing).
+- Tier pricing unified across the two flavors (rows vs columns) into the
+  same `min_qty`/`max_qty` shape.
+- Multi-sheet merged with provenance (`sourceRef.sheet`).
+- Magnitude-over-labels caught the q4 column-swap trap.
+- Validation oracle (Σ ≈ grand total) used and cited.
+- All three `matchMethod` values exercised; no confident-wrong matches
+  observed across 157 total extracted lines.
+
+**Cost envelope (real):** $0.04–$0.15 per parse, 125–325s wall-clock,
+all four runs inside `maxBudgetUsd: 0.5` and `maxTurns: 25`.
+
+**Rejected at this point:**
+
+- Bulk `lookup_catalog([sku1, sku2, …])` — would save ~$0.05/run in
+  worst case, but adds tool surface complexity and the agent already
+  handles single-call latency fine.
+- Forcing object-typed `extraction` input schema (would eliminate
+  string-JSON retry rounds) — locks the payload shape; defer until
+  schema is stable.
+- Per-run lookup memoization — premature; not a real cost driver yet.
+- Switching parser model to Haiku 4.5 — Sonnet's reasoning on the q1
+  L-vs-XL anomaly and the q4 swap detection are exactly the kind of
+  judgment we don't want to lose. Cost gap is small in absolute terms.
+
+**Future-scale considerations** (documented in `docs/SCALING.md` if
+this code goes to production with thousands of parses/day): cache
+known canonical SKUs, hot-path for templates we've seen before, stream
+agent thinking to the UI so users don't watch a blank spinner for
+3 minutes.
+
+---
+
 ## Standing conventions (not ADRs)
 
 - Conventional commits (`feat:`, `fix:`, `chore:`, …).
