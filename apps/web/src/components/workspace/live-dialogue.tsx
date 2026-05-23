@@ -56,6 +56,7 @@ export function LiveDialogue({ quotation, negotiations, events }: Props) {
   const maxRound = Math.max(0, ...negotiations.map((n) => n.roundsCount));
   const isLive =
     quotation.status === 'negotiating' || quotation.status === 'parsed';
+  const title = isLive ? 'Live negotiation' : 'Negotiation history';
 
   return (
     <section className="rounded-xl border border-border bg-card">
@@ -66,7 +67,7 @@ export function LiveDialogue({ quotation, negotiations, events }: Props) {
           </div>
           <div>
             <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Live negotiation
+              {title}
             </div>
             <div className="text-[12.5px] font-medium text-foreground">
               {isLive
@@ -82,17 +83,6 @@ export function LiveDialogue({ quotation, negotiations, events }: Props) {
           </div>
         ) : null}
       </header>
-
-      {quotation.userInstruction ? (
-        <div className="border-b border-border bg-muted/30 px-5 py-2.5 text-[11.5px] text-muted-foreground">
-          <span className="font-semibold uppercase tracking-wider text-muted-foreground">
-            Brand intent
-          </span>
-          <span className="ml-2 text-foreground">
-            {quotation.userInstruction}
-          </span>
-        </div>
-      ) : null}
 
       <div
         ref={scrollRef}

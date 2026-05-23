@@ -66,27 +66,27 @@ export function UploadDialog({ open, onOpenChange }: Props) {
       <DialogContent className="sm:max-w-[520px]">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 font-display text-[18px] tracking-tight text-foreground">
-            New RFQ from supplier quote
+            Upload supplier quotation
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
                   type="button"
                   className="text-muted-foreground hover:text-foreground"
-                  aria-label="Why is this called inbound?"
+                  aria-label="Why upload manually?"
                 >
                   <Info className="size-3.5" />
                 </button>
               </TooltipTrigger>
               <TooltipContent side="right" className="max-w-xs text-[12px]">
-                In production this would arrive automatically when the supplier
-                replies to your RFQ via email. For the demo, drop the file they
-                sent.
+                In a real deployment this could be auto-ingested by parsing
+                inbound emails from the supplier. The manual upload here keeps
+                that path open while letting you trigger the flow on demand.
               </TooltipContent>
             </Tooltip>
           </DialogTitle>
           <p className="text-[13px] text-muted-foreground">
-            Parse the quote, then negotiate against the other two suppliers in
-            parallel.
+            Drop the file and the platform parses it, runs a parallel
+            negotiation against all three suppliers, and recommends a winner.
           </p>
         </DialogHeader>
 
@@ -152,7 +152,7 @@ export function UploadDialog({ open, onOpenChange }: Props) {
               onChange={(e) => setInstruction(e.target.value)}
               rows={2}
               placeholder="Prioritize lead time and quality. Hard deadline 30 days."
-              className="resize-none text-[13px]"
+              className="resize-none text-[13px] text-foreground placeholder:text-muted-foreground/70"
             />
           </div>
 

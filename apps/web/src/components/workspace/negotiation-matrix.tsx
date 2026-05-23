@@ -1,6 +1,7 @@
 import { Link } from '@tanstack/react-router';
 import { ArrowRight, Star, Trophy } from 'lucide-react';
 import type {
+  NegotiationMessageRow,
   NegotiationRow,
   QuotationDetailResponse,
   QuotationLineRow,
@@ -355,9 +356,101 @@ function SupplierColumnHeader({
         <span>View thread</span>
         <ArrowRight className="size-3" />
       </Link>
+
+      <TurnTrail messages={negotiation.messages} supplierLabel={meta.shortLabel} />
     </div>
   );
 }
+
+function TurnTrail({
+  messages,
+  supplierLabel,
+}: {
+  messages: NegotiationMessageRow[];
+  supplierLabel: string;
+}) {
+  if (messages.length === 0) {
+    return (
+      <div className="mt-3 text-[10.5px] italic text-muted-foreground">
+        No turns yet.
+      </div>
+    );
+  }
+  const recent = messages.slice(-4).reverse();
+  return (
+    <div className="mt-3 space-y-2">
+      <div className="text-[9.5px] font-semibold uppercase tracking-wider text-muted-foreground">
+        Latest turns
+      </div>
+      <ol className="space-y-2">
+        {recent.map((m) => (
+          <TurnRow key={m.id} message={m} supplierLabel={supplierLabel} />
+        ))}
+      </ol>
+    </div>
+  );
+}
+
+function TurnRow({
+  message,
+  supplierLabel,
+}: {
+  message: NegotiationMessageRow;
+  supplierLabel: string;
+}) {
+  const isBrand = message.role === 'brand';
+  const intent =
+    message.metadata && typeof message.metadata === 'object'
+      ? ((message.metadata as Record<string, unknown>).intent as
+          | string
+          | undefined)
+      : undefined;
+  const intentLabel = intent ? TURN_INTENT_LABEL[intent] : null;
+  return (
+    <li
+      className={cn(
+        'rounded-md border border-border p-2 text-[11px] leading-snug',
+        isBrand ? 'bg-background' : 'bg-muted/40',
+      )}
+    >
+      <div className="flex items-center justify-between text-[9.5px] uppercase tracking-wider text-muted-foreground">
+        <span>
+          R{message.turnIndex + 1}{' '}
+          <span className="font-semibold text-foreground">
+            {isBrand ? 'Valden' : supplierLabel}
+          </span>
+        </span>
+        {intentLabel ? (
+          <span className="font-semibold text-foreground">{intentLabel}</span>
+        ) : null}
+      </div>
+      {message.offer ? (
+        <div className="mt-1 flex flex-wrap items-center gap-1 font-mono text-[10.5px] tabular text-foreground">
+          <span>{money(message.offer.unitPriceAvg, message.offer.currency)}</span>
+          <span className="text-muted-foreground/50">·</span>
+          <span>{message.offer.leadTimeDays}d</span>
+          <span className="text-muted-foreground/50">·</span>
+          <span>{message.offer.paymentTerms.display}</span>
+          {message.offer.fulfillablePct < 1 ? (
+            <span className="ml-1 rounded-sm bg-attention/15 px-1 text-[9.5px] text-attention-foreground/90">
+              {Math.round(message.offer.fulfillablePct * 100)}%
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+      <p className="mt-1 line-clamp-2 text-[11px] text-foreground/85">
+        {message.content}
+      </p>
+    </li>
+  );
+}
+
+const TURN_INTENT_LABEL: Record<string, string> = {
+  counter_offer: 'Countered',
+  accept: 'Accepted',
+  walk_away: 'Walked away',
+  request_clarification: 'Clarification',
+};
 
 function StatusChip({
   status,

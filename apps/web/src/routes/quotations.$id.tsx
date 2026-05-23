@@ -4,8 +4,8 @@ import { CheckCircle2, Sparkles } from 'lucide-react';
 import { LiveDialogue } from '@/components/workspace/live-dialogue';
 import { NegotiationMatrix } from '@/components/workspace/negotiation-matrix';
 import { ParsingActivity } from '@/components/workspace/parsing-activity';
+import { RecommendationReveal } from '@/components/workspace/recommendation-reveal';
 import { SeededWorkspace } from '@/components/workspace/seeded-workspace';
-import { WhyThisWinner } from '@/components/workspace/why-this-winner';
 import { WorkspaceHeader } from '@/components/workspace/workspace-header';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -83,13 +83,7 @@ function RealWorkspace({ id }: { id: string }) {
           />
         ) : (
           <div className="space-y-8">
-            {showLiveDialogue ? (
-              <LiveDialogue
-                quotation={quotation}
-                negotiations={negotiations}
-                events={events}
-              />
-            ) : null}
+            <RecommendationReveal q={quotation} />
 
             <NegotiationMatrix
               quotationId={quotation.id}
@@ -100,9 +94,12 @@ function RealWorkspace({ id }: { id: string }) {
               comparison={quotation.recommendationComparison}
             />
 
-            {quotation.status === 'recommended' ||
-            quotation.status === 'committed' ? (
-              <WhyThisWinner q={quotation} />
+            {showLiveDialogue ? (
+              <LiveDialogue
+                quotation={quotation}
+                negotiations={negotiations}
+                events={events}
+              />
             ) : null}
           </div>
         )}

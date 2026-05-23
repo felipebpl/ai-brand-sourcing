@@ -6,7 +6,6 @@ import {
   FileSpreadsheet,
   Mail,
   Package,
-  Sparkles,
   Star,
   Upload,
 } from 'lucide-react';
@@ -21,7 +20,6 @@ import { cn } from '@/lib/utils';
 export function SeededWorkspace() {
   const [uploadOpen, setUploadOpen] = useState(false);
 
-  const source = supplierMeta(SEED_RFQ.sourceSupplierId);
   const dueDate = new Date(SEED_RFQ.dueDate).toLocaleDateString('en-US', {
     month: 'short',
     day: 'numeric',
@@ -160,36 +158,6 @@ export function SeededWorkspace() {
           </div>
         </div>
 
-        <div className="mt-8 rounded-xl border border-border bg-card p-6">
-          <div className="flex items-start gap-3">
-            <div className="flex size-9 items-center justify-center rounded-full bg-accent text-primary">
-              <Sparkles className="size-4" />
-            </div>
-            <div className="flex-1">
-              <h3 className="font-display text-[15px] font-semibold tracking-tight text-foreground">
-                What happens when {source.shortLabel}'s quote lands
-              </h3>
-              <ol className="mt-2 space-y-1.5 text-[12.5px] leading-relaxed text-muted-foreground">
-                <li>
-                  1. The spreadsheet is parsed; SKUs are matched against the
-                  catalog, typos resolved.
-                </li>
-                <li>
-                  2. Their pricing becomes the baseline for the negotiation.
-                </li>
-                <li>
-                  3. We negotiate against {SEED_RFQ.expectedSupplierIds.length}{' '}
-                  suppliers in parallel — including renegotiating with{' '}
-                  {source.shortLabel}.
-                </li>
-                <li>
-                  4. You'll see a recommended winner with full reasoning. One
-                  click converts it into a draft order.
-                </li>
-              </ol>
-            </div>
-          </div>
-        </div>
       </div>
 
       <div className="border-t border-border bg-background px-8 py-3 shadow-[0_-8px_24px_-12px_rgba(0,0,0,0.08)]">
