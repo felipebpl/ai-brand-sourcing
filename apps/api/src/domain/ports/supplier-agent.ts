@@ -26,8 +26,29 @@ export interface SupplierAgentPort {
 
 export interface SupplierAgentRespondInput {
   negotiationId: string;
-  brandAsk: NegotiationOffer;
+  /**
+   * The brand's most recent message on this negotiation thread.
+   * The supplier adapter pulls the full prior history from the DB
+   * (`negotiation_message[]` rows) and reconstructs the conversation —
+   * the caller doesn't pass history. Only the new ask.
+   */
   brandMessage: string;
+  /**
+   * The structured ask the brand attached to its latest message, if any.
+   * Suppliers respond to either or both (some brand messages are
+   * clarifying questions with no new offer).
+   */
+  brandAsk: NegotiationOffer | null;
+  /**
+   * The line items under negotiation — copied from the parsed quotation.
+   * Suppliers reason about realistic offer levels relative to total
+   * volume and product mix.
+   */
+  quotedItems: ReadonlyArray<{
+    productSku: string;
+    description: string | null;
+    quantity: number;
+  }>;
   turnIndex: number;
 }
 

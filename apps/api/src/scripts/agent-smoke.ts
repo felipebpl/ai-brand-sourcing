@@ -1,10 +1,17 @@
 import { resolve } from 'node:path';
-import { eq } from 'drizzle-orm';
+import { desc, eq } from 'drizzle-orm';
 import { db } from '../db';
-import { quotation, quotationLine } from '../db/schema';
+import {
+  negotiation,
+  negotiationMessage,
+  quotation,
+  quotationLine,
+  supplier,
+} from '../db/schema';
 import { eventBus } from '../infra/agent-sdk/event-bus';
 import { ClaudeBrandAgentAdapter } from '../infra/agent-sdk/adapters/brand-agent.claude';
 import { ClaudeParserAdapter } from '../infra/agent-sdk/adapters/parser.claude';
+import { ClaudeSupplierAgentAdapter } from '../infra/agent-sdk/adapters/supplier-agent.claude';
 import { parseAndPersist } from '../quotations/pipeline';
 
 /**
@@ -110,6 +117,12 @@ if (mode === 'parse' || mode === 'parse-persist') {
   process.exit(0);
 }
 
+if (mode === 'negotiate-round') {
+  const supplierId = process.argv[3] ?? 'supplier-2';
+  await runNegotiateRound(supplierId);
+  process.exit(0);
+}
+
 const adapter = new ClaudeBrandAgentAdapter({ db, eventBus });
 
 if (mode === 'parser-ping') {
@@ -124,3 +137,137 @@ if (mode === 'parser-ping') {
 
 log('Done.');
 process.exit(0);
+
+// ---------------------------------------------------------------------------
+
+async function runNegotiateRound(supplierId: string): Promise<void> {
+  // Find the most recent parsed quotation to negotiate over.
+  const recent = await db
+    .select({
+      id: quotation.id,
+      sourceSupplierId: quotation.sourceSupplierId,
+      parsedMetadata: quotation.parsedMetadata,
+    })
+    .from(quotation)
+    .where(eq(quotation.status, 'parsed'))
+    .orderBy(desc(quotation.updatedAt))
+    .limit(1);
+  const quotationRow = recent[0];
+  if (!quotationRow) {
+    console.error(
+      'No parsed quotation available. Run `bun agent:smoke parse-persist assets/quotation_2.xlsx` first.',
+    );
+    process.exit(1);
+  }
+
+  const supplierRow = await db
+    .select()
+    .from(supplier)
+    .where(eq(supplier.id, supplierId))
+    .limit(1);
+  const profileRow = supplierRow[0];
+  if (!profileRow) {
+    console.error(`Supplier ${supplierId} not found`);
+    process.exit(1);
+  }
+
+  // Pull the items being negotiated (first 25 lowest-tier rows).
+  const lineRows = await db
+    .select({
+      productSku: quotationLine.matchedSku,
+      description: quotationLine.rawDescription,
+      quantity: quotationLine.minQty,
+    })
+    .from(quotationLine)
+    .where(eq(quotationLine.quotationId, quotationRow.id))
+    .limit(50);
+  const quotedItems: Array<{
+    productSku: string;
+    description: string | null;
+    quantity: number;
+  }> = [];
+  for (const r of lineRows) {
+    if (r.productSku === null) continue;
+    quotedItems.push({
+      productSku: r.productSku,
+      description: r.description,
+      quantity: Number(r.quantity),
+    });
+  }
+
+  // Open a fresh negotiation row for this round (or reuse the latest one).
+  const insertedNegotiation = await db
+    .insert(negotiation)
+    .values({
+      quotationId: quotationRow.id,
+      supplierId,
+      status: 'active',
+    })
+    .returning({ id: negotiation.id });
+  const negotiationId = insertedNegotiation[0]?.id;
+  if (!negotiationId) {
+    console.error('Failed to insert negotiation row');
+    process.exit(1);
+  }
+
+  // Fabricate the brand opening message (the real brand agent will do this in Step 5).
+  const brandOpeningMessage = [
+    `Hello — we are sourcing this bundle of ${quotedItems.length} SKUs.`,
+    `We have a baseline price of $52.00 average unit price from another partner,`,
+    `lead time 50 days, terms 33/33/33. Premium quality is important to us, but`,
+    `we are also cost-conscious. Where can ${profileRow.name} land on price,`,
+    `lead time, and payment terms for this bundle?`,
+  ].join(' ');
+
+  await db.insert(negotiationMessage).values({
+    negotiationId,
+    role: 'brand',
+    turnIndex: 0,
+    content: brandOpeningMessage,
+    offer: null,
+    metadata: { simulated: true, quotationId: quotationRow.id },
+  });
+
+  log(
+    `Negotiation ${negotiationId} (${supplierId}) — brand opening message persisted`,
+  );
+
+  const supplierAdapter = new ClaudeSupplierAgentAdapter({
+    db,
+    eventBus,
+    profile: {
+      id: profileRow.id,
+      name: profileRow.name,
+      qualityScore: Number(profileRow.qualityScore),
+      defaultLeadTimeDays: profileRow.defaultLeadTimeDays,
+      defaultPaymentTermsDisplay:
+        (profileRow.defaultPaymentTerms as { display?: string } | null)
+          ?.display ?? 'TBD',
+      pricingProfile: profileRow.pricingProfile as 'cheap' | 'mid' | 'premium',
+      reliabilityScore: profileRow.reliabilityScore,
+      onTimeDeliveryRate: profileRow.onTimeDeliveryRate,
+    },
+    brand,
+    defaultPaymentTermsDisplay:
+      (profileRow.defaultPaymentTerms as { display?: string } | null)
+        ?.display ?? 'TBD',
+  });
+
+  log(`Invoking supplier agent ${supplierId}...`);
+  const response = await supplierAdapter.respond({
+    negotiationId,
+    brandMessage: brandOpeningMessage,
+    brandAsk: null,
+    quotedItems,
+    turnIndex: 1,
+  });
+
+  log('Supplier response', response);
+
+  const persistedMessages = await db
+    .select()
+    .from(negotiationMessage)
+    .where(eq(negotiationMessage.negotiationId, negotiationId));
+  log(`Persisted ${persistedMessages.length} negotiation_message rows`);
+  log('Thread', persistedMessages);
+}
