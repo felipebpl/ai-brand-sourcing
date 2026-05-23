@@ -328,6 +328,92 @@ agent thinking to the UI so users don't watch a blank spinner for
 
 ---
 
+## ADR-015 — Suppliers as independent Claude sessions, not subagents of the brand
+
+**Status:** Accepted.
+
+**Decision:** Each supplier agent runs as its own top-level `query()`
+call to the Claude API — a fully **independent session** orchestrated
+in TypeScript code. The brand and the suppliers communicate through
+`negotiation_message` rows in Postgres: that table is the source of
+truth. Suppliers are NOT invoked via the SDK's `Agent` tool / `options.agents`
+subagent mechanism.
+
+**Why (over invoking suppliers as subagents):**
+
+1. **Real-world metaphor maps cleanly.** Suppliers are external
+   entities (manufacturers in different companies) exchanging emails
+   with the brand. Each one has its own brain, memory, agenda. That's
+   "two independent processes talking via a channel" — not "function
+   call returning a value to a parent process". Independent sessions
+   are the literal translation of that metaphor.
+2. **Curveball injection is natural.** The challenge's curveball
+   ("Supplier 2 came back saying they can only fulfill 60% of the
+   order") originates from the supplier side. With independent
+   sessions, the curveball is a `negotiation_message(role=supplier)`
+   row inserted directly by the UI form — no LLM call required, since
+   the user IS the supplier in that moment. The brand reacts via the
+   `supplier.message` Inngest event. With subagent semantics
+   (fire-and-forget, master-initiated), suppliers can't initiate at
+   all — the curveball would need a synthetic, awkward inject mechanism.
+3. **Information asymmetry is enforced at the data boundary.** Each
+   supplier session loads its own history via
+   `SELECT FROM negotiation_message WHERE negotiation_id = X` — there
+   is no SQL path that leaks another supplier's offers. With subagent
+   semantics, brand passes context as a string and discipline lives
+   in the brand prompt; one slip leaks payloads.
+4. **Multi-turn is trivial.** No session resume gymnastics, no
+   subpath tracking. Each call re-reads the thread and reconstructs
+   the prompt. Safe for Inngest cross-host re-execution; safe for
+   Postgres-backed event-sourcing.
+5. **Persona is per-instance.** Same `ClaudeSupplierAgentAdapter`
+   class, different `profile` injected per instance — `s1Profile`,
+   `s2Profile`, `s3Profile`. The Anthropic API only ever sees one
+   persona + one history per call. No cross-contamination is possible.
+
+**Empirical evidence (single round, same brand opening message):**
+
+| Supplier | Persona | Response | Intent |
+|---|---|---|---|
+| S1 Thai Textiles | weary cost-cutter | "We can beat $52. Before I quote: 1k tier, 5k tier, or both?" | `request_clarification` (won't quote blind) |
+| S2 Apex Manufacturing | premium defender | "$59.50, 25d, 40/60. Annual commitment buys you 5% and 30/70" | `counter_offer` (defends premium) |
+| S3 Velocity Fabriks | terse speed merchant | "$50, 15d, 100% upfront — that's how we fund the speed. Ready?" | `counter_offer` (firm on upfront) |
+
+Three radically distinct on-persona outputs from the same input.
+Validation cost: ~$0.13 total / ~3 min wall-clock on Haiku 4.5. See
+`ClaudeSupplierAgentAdapter` validation runs (Step 4 commit).
+
+**Rejected alternatives:**
+
+- **Subagents via `options.agents` + `Agent` tool** (Option A from
+  earlier scoping conversation). Cons: fire-and-forget per call;
+  supplier can't initiate (kills the curveball metaphor); info
+  asymmetry by prompt discipline only; hierarchical master/sub doesn't
+  match peer-entity reality. The cost saving was illusory (brand would
+  still have to pass full history each call).
+- **Hybrid (subagent with external session continuity)**: more
+  complexity than either pure approach, no clear win.
+
+**Implementation map:**
+
+- `apps/api/src/domain/ports/supplier-agent.ts` — `SupplierAgentPort`
+  interface + `SupplierAgentResponse` discriminated union.
+- `apps/api/src/infra/agent-sdk/prompts/supplier-persona.ts` — three
+  persona blocks keyed by supplier id + brand-context / info-asymmetry
+  / output-contract boilerplate.
+- `apps/api/src/infra/agent-sdk/adapters/supplier-agent.claude.ts` —
+  `ClaudeSupplierAgentAdapter`. Constructor takes `profile`; `respond`
+  reads `negotiation_message[]`, builds prompt, calls Haiku 4.5,
+  persists reply.
+
+**Channel format:** every turn is a row in `negotiation_message` with
+`role IN ('brand', 'supplier', 'system')`, `turn_index`, `content`
+(natural language), `offer` JSONB (structured proposal when present),
+`metadata` JSONB (model used, cost, intent). System rows carry
+curveball + audit events.
+
+---
+
 ## Standing conventions (not ADRs)
 
 - Conventional commits (`feat:`, `fix:`, `chore:`, …).

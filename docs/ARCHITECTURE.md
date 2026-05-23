@@ -2,19 +2,22 @@
 
 ## One-paragraph summary
 
-A user uploads an XLSX quotation through the React UI. The API stores the
-file, inserts a `quotation` row, and emits `quotation.uploaded` to Inngest.
-A handler runs the **brand agent** (the orchestrating intelligence — Claude
-Opus 4.7), which invokes the **parser agent** (a subagent with the
-`quotation-parser` skill loaded — Claude Sonnet 4.6 running Python via
-Bash) to extract structured line items, resolves SKUs against the product
-catalog (Postgres `pg_trgm` fuzzy lookup), opens 4 parallel
-**negotiations** (one per supplier — the source supplier is renegotiable,
-plus 3 simulated counterparts), conducts a multi-round dialogue, then
-emits a **recommendation** with reasoning. The user clicks "Convert to PO"
-to materialize a Purchase Order. At any point in the life of the system,
-a `supplier.message` event (generic curveball channel) can land and
-trigger a re-evaluation — the brand agent decides whether to keep the
+A user uploads an XLSX quotation through the React UI. The API stores
+the file, inserts a `quotation` row, and emits `quotation.uploaded` to
+Inngest. A handler runs the **parse-and-persist pipeline** — invoking
+the **parser subagent** (Claude Sonnet 4.6 with the `quotation-parser`
+skill, running Python via Bash) to extract structured line items and
+resolve SKUs against the catalog (Postgres `pg_trgm` fuzzy lookup) —
+then opens **3 parallel negotiations** (one per supplier from the
+challenge brief; the source supplier from the XLSX is renegotiable
+too). Each supplier is an **independent Claude session** (Haiku 4.5)
+with its own persona, communicating with the brand through
+`negotiation_message[]` rows — not a subagent of the brand. The brand
+agent (Opus 4.7) orchestrates multi-round dialogue, then emits a
+**Recommendation** with reasoning. The user clicks "Convert to PO" to
+materialize a Purchase Order. At any point in the system's life, a
+`supplier.message` event (the canonical curveball channel) can land
+and trigger a re-evaluation — the brand decides whether to keep the
 current recommendation, swap winner, or renegotiate.
 
 ## Topology
@@ -52,16 +55,8 @@ current recommendation, swap winner, or renegotiate.
        │ Claude Agent SDK adapters                  │
        │  (src/infra/agent-sdk/)                    │
        │   ┌───────────────────────────────────┐    │
-       │   │ Brand Agent (Opus 4.7)            │    │
-       │   │   tools: Agent + mcp__brand__*    │    │
-       │   │   subagents: supplier-1..4        │    │
-       │   │   loop: parallel Agent calls per  │    │
-       │   │     round, decides stopping       │    │
-       │   │   output: Recommendation          │    │
-       │   └─────────────┬─────────────────────┘    │
-       │                 │                          │
-       │   ┌─────────────▼─────────────┐            │
-       │   │ Parser Agent (Sonnet 4.6) │            │
+       │   ┌───────────────────────────┐            │
+       │   │ Parser Subagent (Sonnet)  │            │
        │   │   skill: quotation-parser │            │
        │   │   tools: Bash, Read,      │            │
        │   │     mcp__parser__*        │            │
@@ -70,12 +65,24 @@ current recommendation, swap winner, or renegotiate.
        │   └───────────────────────────┘            │
        │                                            │
        │   ┌─────────────────────────────────────┐  │
-       │   │ Supplier Agents × 4 (Haiku 4.5)     │  │
-       │   │   one per supplier persona          │  │
-       │   │   information-asymmetric (each      │  │
-       │   │     sees only its own history)      │  │
-       │   │   tool: mcp__supplier__respond      │  │
-       │   └─────────────────────────────────────┘  │
+       │   │ Brand Agent (Opus 4.7) — Step 5     │  │
+       │   │   tools: mcp__brand__*              │  │
+       │   │   orchestrates rounds; reads/       │  │
+       │   │   writes negotiation_message rows;  │  │
+       │   │   calls Supplier adapters in parallel│  │
+       │   │   output: Recommendation            │  │
+       │   └─────────────┬───────────────────────┘  │
+       │                 │                          │
+       │   ┌─────────────▼─────────────────────────┐│
+       │   │ Supplier Agents × 3 (Haiku 4.5)        ││
+       │   │   independent Claude sessions          ││
+       │   │   one per persona (S1/S2/S3)           ││
+       │   │   information-asymmetric (each sees    ││
+       │   │     only its own negotiation_message[])││
+       │   │   channel = DB rows, NOT Agent tool    ││
+       │   │   structured output: counter_offer /   ││
+       │   │     accept / walk_away / clarification ││
+       │   └────────────────────────────────────────┘│
        └────────────────────────────────────────────┘
 
        UI streaming bus:
@@ -126,12 +133,19 @@ content in the same event.
    typed `QuotationExtraction`. `quotation_line` rows persisted. Status
    becomes `parsed`.
 
-3. **Negotiate.** Brand agent opens 4 negotiations (one per supplier
-   including the source supplier — renegotiable). For each round:
-   parallel `Agent('supplier-N', brandAsk)` calls. Each supplier agent
-   sees only its own history (information asymmetry preserved). Brand
-   evaluates responses, decides whether to push another round or to
-   conclude. Status becomes `negotiating`.
+3. **Negotiate.** Brand agent opens **3 negotiations** (one per supplier
+   from the challenge brief; the source supplier from the XLSX is
+   renegotiable too). For each round: parallel
+   `supplierAdapter.respond({ negotiationId, brandMessage, … })` calls
+   across the 3 supplier instances. Each supplier is an independent
+   Claude session — same `ClaudeSupplierAgentAdapter` class, different
+   `profile` injected per instance — communicating with the brand via
+   `negotiation_message` rows. Each supplier reads only its own
+   thread (filtered by `negotiation_id` in SQL), preserving information
+   asymmetry. Brand evaluates responses, decides whether to push another
+   round or to conclude. Status becomes `negotiating`. See
+   [NEGOTIATION.md](NEGOTIATION.md) for the loop detail and ADR-015
+   for the "independent sessions vs subagent" choice.
 
 4. **Recommend.** Brand agent submits a `Recommendation` (single winner
    in this scope per the team's guidance — split-sourcing not modeled
