@@ -6,14 +6,16 @@ import { StatusPill } from '@/components/quotations/status-pill';
 import { UploadDialog } from '@/components/quotations/upload-dialog';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { api } from '@/lib/api';
+import { api, type QuotationSummary } from '@/lib/api';
+import { rfqNumber } from '@/lib/rfq';
+import { supplierMeta } from '@/lib/suppliers';
 import { formatRelative } from '@/lib/time';
 
 export const Route = createFileRoute('/quotations/')({
-  component: QuotationsIndex,
+  component: RFQsIndex,
 });
 
-function QuotationsIndex() {
+function RFQsIndex() {
   const [uploadOpen, setUploadOpen] = useState(false);
 
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
@@ -35,23 +37,24 @@ function QuotationsIndex() {
       <div className="flex items-end justify-between px-8 pt-7 pb-5">
         <div>
           <h1 className="font-display text-[24px] font-semibold tracking-tight text-foreground">
-            Quotations
+            RFQs
           </h1>
           <p className="mt-1 text-[13px] text-muted-foreground">
-            Upload a supplier quotation. We negotiate with all 3 in parallel and
-            recommend the winner.
+            Each RFQ is a sourcing event triggered by a supplier quote. We
+            negotiate against all three suppliers in parallel and recommend a
+            winner.
           </p>
         </div>
         <Button size="sm" onClick={() => setUploadOpen(true)}>
           <Plus className="size-3.5" />
-          New quotation
+          New RFQ
         </Button>
       </div>
 
       <div className="flex items-center gap-2 border-b border-border px-8 pb-3">
         <button className="flex h-7 items-center gap-1.5 rounded-md border border-border bg-background px-2.5 text-[12px] font-medium text-foreground hover:bg-muted">
           <Filter className="size-3" />
-          All quotations
+          All RFQs
         </button>
         <button className="flex h-7 items-center gap-1.5 rounded-md px-2.5 text-[12px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground">
           Active
@@ -66,7 +69,7 @@ function QuotationsIndex() {
           <div className="flex h-7 items-center gap-1.5 rounded-md border border-border bg-background px-2.5 text-[12px] text-muted-foreground">
             <Search className="size-3" />
             <input
-              placeholder="Search by file or instruction"
+              placeholder="Search by file or intent"
               className="w-48 bg-transparent outline-none placeholder:text-muted-foreground/70"
             />
           </div>
@@ -88,7 +91,7 @@ function QuotationsIndex() {
         {!isLoading && !isError && rows.length === 0 ? (
           <EmptyState onUpload={() => setUploadOpen(true)} />
         ) : null}
-        {rows.length > 0 ? <QuotationsTable rows={rows} /> : null}
+        {rows.length > 0 ? <RfqTable rows={rows} /> : null}
       </div>
 
       {isFetching && rows.length > 0 ? (
@@ -103,68 +106,58 @@ function QuotationsIndex() {
   );
 }
 
-function QuotationsTable({
-  rows,
-}: {
-  rows: Awaited<ReturnType<typeof api.listQuotations>>['quotations'];
-}) {
+function RfqTable({ rows }: { rows: QuotationSummary[] }) {
   return (
     <table className="w-full text-[13px]">
       <thead>
-        <tr className="border-b border-border text-left text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-          <th className="px-8 py-2 font-medium">Quotation</th>
-          <th className="py-2 font-medium">Status</th>
-          <th className="py-2 font-medium">Source supplier</th>
-          <th className="py-2 font-medium">Intent</th>
-          <th className="py-2 pr-8 text-right font-medium">Updated</th>
+        <tr className="border-b border-border text-left text-[10.5px] font-medium uppercase tracking-wider text-muted-foreground">
+          <th className="px-8 py-2.5 font-medium">RFQ</th>
+          <th className="py-2.5 font-medium">From</th>
+          <th className="py-2.5 font-medium">Status</th>
+          <th className="py-2.5 font-medium">Sourcing intent</th>
+          <th className="py-2.5 pr-8 text-right font-medium">Updated</th>
         </tr>
       </thead>
       <tbody>
-        {rows.map((q) => (
-          <tr
-            key={q.id}
-            className="group cursor-pointer border-b border-border/70 transition-colors hover:bg-muted/50"
-          >
-            <td className="px-8 py-3">
-              <Link
-                to="/quotations/$id"
-                params={{ id: q.id }}
-                className="flex flex-col gap-0.5"
-              >
-                <span className="truncate font-medium text-foreground">
-                  {q.uploadedFilename}
-                </span>
-                <span className="font-mono text-[11px] text-muted-foreground">
-                  {q.id.slice(0, 8)}
-                </span>
-              </Link>
-            </td>
-            <td className="py-3">
-              <StatusPill status={q.status} />
-            </td>
-            <td className="py-3 text-foreground">
-              <SupplierLabel id={q.sourceSupplierId} />
-            </td>
-            <td className="max-w-[360px] truncate py-3 text-muted-foreground">
-              {q.userInstruction || (
-                <span className="italic text-muted-foreground/60">—</span>
-              )}
-            </td>
-            <td className="py-3 pr-8 text-right tabular text-muted-foreground">
-              {formatRelative(q.updatedAt)}
-            </td>
-          </tr>
-        ))}
+        {rows.map((q) => {
+          const source = supplierMeta(q.sourceSupplierId);
+          return (
+            <tr
+              key={q.id}
+              className="group cursor-pointer border-b border-border/70 transition-colors hover:bg-muted/50"
+            >
+              <td className="px-8 py-3">
+                <Link
+                  to="/quotations/$id"
+                  params={{ id: q.id }}
+                  className="flex flex-col gap-0.5"
+                >
+                  <span className="font-mono text-[12.5px] font-medium text-foreground">
+                    {rfqNumber(q)}
+                  </span>
+                  <span className="truncate text-[11.5px] text-muted-foreground">
+                    {q.uploadedFilename}
+                  </span>
+                </Link>
+              </td>
+              <td className="py-3 text-foreground">{source.label}</td>
+              <td className="py-3">
+                <StatusPill status={q.status} />
+              </td>
+              <td className="max-w-[360px] truncate py-3 text-muted-foreground">
+                {q.userInstruction || (
+                  <span className="italic text-muted-foreground/60">—</span>
+                )}
+              </td>
+              <td className="py-3 pr-8 text-right tabular text-muted-foreground">
+                {formatRelative(q.updatedAt)}
+              </td>
+            </tr>
+          );
+        })}
       </tbody>
     </table>
   );
-}
-
-function SupplierLabel({ id }: { id: string }) {
-  if (id === 'supplier-1') return <>Source · S1</>;
-  if (id === 'supplier-2') return <>Apex Manufacturing</>;
-  if (id === 'supplier-3') return <>Velocity Fabriks</>;
-  return <span className="font-mono text-[12px]">{id}</span>;
 }
 
 function EmptyState({ onUpload }: { onUpload: () => void }) {
@@ -175,15 +168,15 @@ function EmptyState({ onUpload }: { onUpload: () => void }) {
           <Plus className="size-5" />
         </div>
         <h3 className="mt-4 font-display text-[18px] font-semibold tracking-tight">
-          No quotations yet
+          No RFQs yet
         </h3>
         <p className="mt-1.5 text-[13px] text-muted-foreground">
-          Drop a supplier XLSX. In about four minutes you'll have a recommended
-          winner with full reasoning.
+          Drop a supplier quote. In about four minutes you'll have a
+          recommended winner across all three suppliers, with full reasoning.
         </p>
         <Button className="mt-5" size="sm" onClick={onUpload}>
           <Plus className="size-3.5" />
-          New quotation
+          New RFQ
         </Button>
       </div>
     </div>
@@ -205,7 +198,7 @@ function ErrorState({
         </h3>
         <p className="mt-1.5 text-[13px] text-muted-foreground">
           {message ||
-            "The backend isn't responding at localhost:3030. Start it with `bun --filter @app/api dev`."}
+            "The backend isn't responding at localhost:3030. Start it with `PORT=3030 bun --filter @app/api dev`."}
         </p>
         <Button variant="outline" size="sm" className="mt-4" onClick={onRetry}>
           Retry

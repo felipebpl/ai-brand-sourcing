@@ -1,6 +1,7 @@
 import { ChevronLeft, FileSpreadsheet } from 'lucide-react';
 import { Link } from '@tanstack/react-router';
 import type { QuotationDetailResponse } from '@/lib/api';
+import { rfqNumber } from '@/lib/rfq';
 import { formatRelative } from '@/lib/time';
 import { supplierMeta } from '@/lib/suppliers';
 import { StatusPill } from '@/components/quotations/status-pill';
@@ -12,6 +13,7 @@ type Props = {
 
 export function WorkspaceHeader({ q, roundsInFlight }: Props) {
   const source = supplierMeta(q.sourceSupplierId);
+  const number = rfqNumber(q);
 
   return (
     <div className="border-b border-border bg-background">
@@ -20,28 +22,31 @@ export function WorkspaceHeader({ q, roundsInFlight }: Props) {
           <ChevronLeft className="size-3.5" />
         </Link>
         <Link to="/quotations" className="hover:text-foreground">
-          Quotations
+          RFQs
         </Link>
         <span className="text-muted-foreground/50">/</span>
-        <span className="font-mono text-foreground">{q.id.slice(0, 8)}</span>
+        <span className="font-mono text-foreground">{number}</span>
       </div>
 
       <div className="flex items-start justify-between gap-8 px-8 pt-2 pb-5">
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-3">
             <h1 className="font-display text-[26px] font-semibold tracking-tight text-foreground">
-              {q.uploadedFilename.replace(/\.xlsx$/i, '')}
+              {number}
             </h1>
             <StatusPill status={q.status} className="translate-y-[-2px]" />
           </div>
 
-          <div className="mt-1.5 flex items-center gap-2 text-[12.5px] text-muted-foreground">
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[12.5px] text-muted-foreground">
             <FileSpreadsheet className="size-3.5" />
             <span>
-              Received from <span className="text-foreground">{source.label}</span>
+              Baseline from{' '}
+              <span className="text-foreground">{source.label}</span>
             </span>
             <span className="text-muted-foreground/50">·</span>
-            <span>baseline for negotiation</span>
+            <span className="font-mono text-[11.5px]">
+              {q.uploadedFilename}
+            </span>
             <span className="text-muted-foreground/50">·</span>
             <span>{formatRelative(q.createdAt)}</span>
           </div>

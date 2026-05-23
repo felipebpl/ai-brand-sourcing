@@ -22,7 +22,7 @@ const NAV: NavItem[] = [
   { to: '/inbox', label: 'Inbox', icon: <Inbox className="size-4" /> },
   {
     to: '/quotations',
-    label: 'Quotations',
+    label: 'RFQs',
     icon: <ScrollText className="size-4" />,
   },
   { to: '/orders', label: 'Orders', icon: <Package className="size-4" /> },

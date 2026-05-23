@@ -1,18 +1,22 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
-import { FileSpreadsheet, Upload } from 'lucide-react';
+import { FileSpreadsheet, Info, Upload } from 'lucide-react';
 import { useRef, useState } from 'react';
 import {
   Dialog,
   DialogClose,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
@@ -61,14 +65,29 @@ export function UploadDialog({ open, onOpenChange }: Props) {
     >
       <DialogContent className="sm:max-w-[520px]">
         <DialogHeader>
-          <DialogTitle className="font-display text-[18px] tracking-tight">
-            Simulate inbound quote
+          <DialogTitle className="flex items-center gap-2 font-display text-[18px] tracking-tight text-foreground">
+            New RFQ from supplier quote
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  className="text-muted-foreground hover:text-foreground"
+                  aria-label="Why is this called inbound?"
+                >
+                  <Info className="size-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="right" className="max-w-xs text-[12px]">
+                In production this would arrive automatically when the supplier
+                replies to your RFQ via email. For the demo, drop the file they
+                sent.
+              </TooltipContent>
+            </Tooltip>
           </DialogTitle>
-          <DialogDescription className="text-[13px]">
-            In production this lands automatically when a supplier responds to
-            your RFQ. For the demo, drop the file they sent and add what
-            matters most for this sourcing decision.
-          </DialogDescription>
+          <p className="text-[13px] text-muted-foreground">
+            Parse the quote, then negotiate against the other two suppliers in
+            parallel.
+          </p>
         </DialogHeader>
 
         <div className="space-y-4 py-1">
