@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { API_BASE_URL } from './api';
 
 export type AgentEventKind =
@@ -35,25 +35,36 @@ const KINDS: AgentEventKind[] = [
   'po.issued',
 ];
 
+const MAX_EVENTS = 200;
+
 /**
- * Subscribe to the SSE stream for a quotation. On every agent event we
- * invalidate the quotation detail query so React Query refetches the
- * authoritative state. We also expose the most recent event for the UI
- * to flash micro-narration above the supplier cards.
+ * Subscribe to the SSE stream for a quotation. Accumulates events for
+ * rich narration panels and exposes the most recent event for any
+ * compact ticker. On every agent event the quotation detail query is
+ * invalidated so React Query refetches authoritative state (messages
+ * persisted server-side).
  */
 export function useNegotiationStream(quotationId: string | undefined) {
   const queryClient = useQueryClient();
-  const [lastEvent, setLastEvent] = useState<AgentEvent | null>(null);
+  const [events, setEvents] = useState<AgentEvent[]>([]);
+  const seenIds = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (!quotationId) return;
+    seenIds.current = new Set();
+    setEvents([]);
     const url = `${API_BASE_URL}/quotations/${quotationId}/stream`;
     const source = new EventSource(url);
 
     const handle = (evt: MessageEvent) => {
       try {
         const parsed = JSON.parse(evt.data) as AgentEvent;
-        setLastEvent(parsed);
+        if (seenIds.current.has(parsed.id)) return;
+        seenIds.current.add(parsed.id);
+        setEvents((prev) => {
+          const next = [...prev, parsed];
+          return next.length > MAX_EVENTS ? next.slice(-MAX_EVENTS) : next;
+        });
         queryClient.invalidateQueries({
           queryKey: ['quotation', quotationId],
         });
@@ -78,5 +89,6 @@ export function useNegotiationStream(quotationId: string | undefined) {
     };
   }, [quotationId, queryClient]);
 
-  return { lastEvent };
+  const lastEvent = events.length > 0 ? events[events.length - 1] ?? null : null;
+  return { events, lastEvent };
 }

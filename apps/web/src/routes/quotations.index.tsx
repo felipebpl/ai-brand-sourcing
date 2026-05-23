@@ -117,7 +117,7 @@ function RfqTable({ rows }: { rows: QuotationSummary[] }) {
         </tr>
       </thead>
       <tbody>
-        <SeededRow />
+        {rows.length === 0 ? <SeededRow /> : null}
         {rows.map((q) => {
           const source = supplierMeta(q.sourceSupplierId);
           return (

@@ -1,6 +1,10 @@
 import { Link } from '@tanstack/react-router';
 import { ArrowRight, Star, Trophy } from 'lucide-react';
-import type { NegotiationRow, QuotationLineRow } from '@/lib/api';
+import type {
+  NegotiationRow,
+  QuotationDetailResponse,
+  QuotationLineRow,
+} from '@/lib/api';
 import { delta, money } from '@/lib/format';
 import { accentClasses, supplierMeta } from '@/lib/suppliers';
 import { formatRelative } from '@/lib/time';
@@ -8,16 +12,20 @@ import { cn } from '@/lib/utils';
 
 type Props = {
   quotationId: string;
+  quotationStatus: QuotationDetailResponse['quotation']['status'];
   lines: QuotationLineRow[];
   negotiations: NegotiationRow[];
   winnerNegotiationId: string | null;
+  comparison: QuotationDetailResponse['quotation']['recommendationComparison'];
 };
 
 export function NegotiationMatrix({
   quotationId,
+  quotationStatus,
   lines,
   negotiations,
   winnerNegotiationId,
+  comparison,
 }: Props) {
   if (lines.length === 0) {
     return (
@@ -27,8 +35,17 @@ export function NegotiationMatrix({
     );
   }
 
+  const isTerminal =
+    quotationStatus === 'recommended' || quotationStatus === 'committed';
+
+  const comparisonByNegId = new Map(
+    (comparison ?? []).map((c) => [c.negotiationId, c]),
+  );
+
   const latestSupplierOffer = (n: NegotiationRow) => {
-    const m = [...n.messages].reverse().find((x) => x.role === 'supplier');
+    const m = [...n.messages]
+      .reverse()
+      .find((x) => x.role === 'supplier' && x.offer != null);
     return m?.offer ?? null;
   };
 
@@ -36,7 +53,26 @@ export function NegotiationMatrix({
     const o = latestSupplierOffer(n);
     if (o) return o.unitPriceAvg;
     if (n.finalUnitPriceAvg) return Number.parseFloat(n.finalUnitPriceAvg);
+    const c = comparisonByNegId.get(n.id);
+    if (c) return c.unitPriceAvg;
     return null;
+  };
+
+  const supplierLatestLead = (n: NegotiationRow): number | null => {
+    const o = latestSupplierOffer(n);
+    if (o?.leadTimeDays != null) return o.leadTimeDays;
+    if (n.finalLeadTimeDays != null) return n.finalLeadTimeDays;
+    const c = comparisonByNegId.get(n.id);
+    if (c) return c.leadTimeDays;
+    return null;
+  };
+
+  const supplierLatestPaymentDisplay = (n: NegotiationRow): string | null => {
+    const o = latestSupplierOffer(n);
+    if (o?.paymentTerms?.display) return o.paymentTerms.display;
+    const c = comparisonByNegId.get(n.id);
+    if (c?.paymentTerms?.display) return c.paymentTerms.display;
+    return supplierMeta(n.supplierId).paymentTerms;
   };
 
   const leadingByPriceId = negotiations
@@ -72,6 +108,7 @@ export function NegotiationMatrix({
                   isLeading={
                     n.id === leadingByPriceId && n.id !== winnerNegotiationId
                   }
+                  isTerminal={isTerminal}
                 />
               </th>
             ))}
@@ -93,8 +130,7 @@ export function NegotiationMatrix({
               {negotiations.map((n) => {
                 const offer = latestSupplierOffer(n);
                 const price = supplierLatestUnit(n);
-                const isLeader =
-                  n.id === leadingByPriceId && price != null;
+                const isLeader = n.id === leadingByPriceId && price != null;
                 const isWinner = n.id === winnerNegotiationId;
                 const d =
                   price != null
@@ -114,7 +150,7 @@ export function NegotiationMatrix({
                           className={cn(
                             'font-mono text-[16px] tabular',
                             isWinner
-                              ? 'text-success'
+                              ? 'text-success font-medium'
                               : isLeader
                               ? 'text-foreground font-medium'
                               : 'text-foreground',
@@ -122,18 +158,16 @@ export function NegotiationMatrix({
                         >
                           {money(price, line.currency)}
                         </div>
-                        {d ? (
+                        {d && d.tone !== 'flat' ? (
                           <div
                             className={cn(
                               'mt-0.5 font-mono text-[10.5px] tabular',
                               d.tone === 'down'
                                 ? 'text-success'
-                                : d.tone === 'up'
-                                ? 'text-destructive'
-                                : 'text-muted-foreground',
+                                : 'text-destructive',
                             )}
                           >
-                            {d.label} vs baseline
+                            {d.label}
                           </div>
                         ) : null}
                         {offer?.fulfillablePct != null &&
@@ -166,8 +200,10 @@ export function NegotiationMatrix({
               </div>
             </td>
             {negotiations.map((n) => {
-              const offer = latestSupplierOffer(n);
               const isWinner = n.id === winnerNegotiationId;
+              const avg = supplierLatestUnit(n);
+              const lead = supplierLatestLead(n);
+              const payment = supplierLatestPaymentDisplay(n);
               return (
                 <td
                   key={n.id}
@@ -187,12 +223,11 @@ export function NegotiationMatrix({
                         : 'text-foreground',
                     )}
                   >
-                    {offer ? money(offer.unitPriceAvg) : '—'}
+                    {avg != null ? money(avg) : '—'}
                   </div>
-                  {offer?.leadTimeDays != null ? (
+                  {lead != null ? (
                     <div className="mt-0.5 font-mono text-[11px] text-muted-foreground tabular">
-                      {offer.leadTimeDays}d ·{' '}
-                      {offer.paymentTerms.display}
+                      {lead}d{payment ? ` · ${payment}` : ''}
                     </div>
                   ) : null}
                 </td>
@@ -251,11 +286,13 @@ function SupplierColumnHeader({
   negotiation,
   isWinner,
   isLeading,
+  isTerminal,
 }: {
   quotationId: string;
   negotiation: NegotiationRow;
   isWinner: boolean;
   isLeading: boolean;
+  isTerminal: boolean;
 }) {
   const meta = supplierMeta(negotiation.supplierId);
   const accent = accentClasses(meta.accent);
@@ -294,13 +331,17 @@ function SupplierColumnHeader({
       </div>
 
       <div className="mt-3 flex items-center justify-between">
-        <StatusChip status={negotiation.status} />
+        <StatusChip
+          status={negotiation.status}
+          isWinner={isWinner}
+          isTerminal={isTerminal}
+        />
         <span className="text-[10px] text-muted-foreground">
           R{negotiation.roundsCount} · {formatRelative(negotiation.updatedAt)}
         </span>
       </div>
 
-      {isLeading && !isWinner ? (
+      {isLeading && !isWinner && !isTerminal ? (
         <div className="mt-2 text-[9.5px] font-semibold uppercase tracking-wider text-primary">
           Leading on price
         </div>
@@ -311,14 +352,38 @@ function SupplierColumnHeader({
         params={{ id: quotationId, negotiationId: negotiation.id }}
         className="mt-3 inline-flex w-full items-center justify-between rounded-md border border-border bg-background px-2.5 py-1.5 text-[11.5px] font-medium text-foreground transition-colors hover:bg-muted"
       >
-        <span>Negotiate</span>
+        <span>View thread</span>
         <ArrowRight className="size-3" />
       </Link>
     </div>
   );
 }
 
-function StatusChip({ status }: { status: NegotiationRow['status'] }) {
+function StatusChip({
+  status,
+  isWinner,
+  isTerminal,
+}: {
+  status: NegotiationRow['status'];
+  isWinner: boolean;
+  isTerminal: boolean;
+}) {
+  if (isTerminal) {
+    if (isWinner) {
+      return (
+        <span className="inline-flex items-center gap-1 text-[9.5px] font-semibold uppercase tracking-wider text-success">
+          <span className="size-1.5 rounded-full bg-success" />
+          Won
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex items-center gap-1 text-[9.5px] font-semibold uppercase tracking-wider text-muted-foreground">
+        <span className="size-1.5 rounded-full bg-muted-foreground/50" />
+        Outbid
+      </span>
+    );
+  }
   if (status === 'concluded') {
     return (
       <span className="inline-flex items-center gap-1 text-[9.5px] font-semibold uppercase tracking-wider text-success">

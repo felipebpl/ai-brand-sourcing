@@ -1,8 +1,9 @@
 import { useQuery } from '@tanstack/react-query';
 import { createFileRoute } from '@tanstack/react-router';
-import { CheckCircle2, FileSpreadsheet, Sparkles } from 'lucide-react';
-import { ActivityTicker } from '@/components/workspace/activity-ticker';
+import { CheckCircle2, Sparkles } from 'lucide-react';
+import { LiveDialogue } from '@/components/workspace/live-dialogue';
 import { NegotiationMatrix } from '@/components/workspace/negotiation-matrix';
+import { ParsingActivity } from '@/components/workspace/parsing-activity';
 import { SeededWorkspace } from '@/components/workspace/seeded-workspace';
 import { WhyThisWinner } from '@/components/workspace/why-this-winner';
 import { WorkspaceHeader } from '@/components/workspace/workspace-header';
@@ -32,7 +33,7 @@ function RealWorkspace({ id }: { id: string }) {
     queryFn: () => api.getQuotation(id),
   });
 
-  const { lastEvent } = useNegotiationStream(data ? id : undefined);
+  const { events } = useNegotiationStream(data ? id : undefined);
 
   if (isLoading) {
     return <WorkspaceSkeleton />;
@@ -63,39 +64,47 @@ function RealWorkspace({ id }: { id: string }) {
   const maxRounds = Math.max(0, ...negotiations.map((n) => n.roundsCount));
   const isPreNegotiation =
     quotation.status === 'uploaded' || quotation.status === 'parsing';
-  const isActive = quotation.status === 'negotiating' || isPreNegotiation;
+  const showLiveDialogue =
+    quotation.status === 'parsed' ||
+    quotation.status === 'negotiating' ||
+    quotation.status === 'recommended' ||
+    quotation.status === 'committed';
 
   return (
     <div className="flex h-full flex-col">
       <WorkspaceHeader q={quotation} roundsInFlight={maxRounds} />
 
-      {isActive ? (
-        <div className="pointer-events-none sticky top-3 z-20 flex justify-center px-8">
-          <div className="pointer-events-auto">
-            <ActivityTicker lastEvent={lastEvent} />
-          </div>
-        </div>
-      ) : null}
-
       <div className="flex-1 overflow-auto px-8 pt-6 pb-24">
         {isPreNegotiation ? (
-          <ParsingPanel status={quotation.status} />
+          <ParsingActivity
+            events={events}
+            lines={lines}
+            status={quotation.status as 'uploaded' | 'parsing'}
+          />
         ) : (
-          <>
+          <div className="space-y-8">
+            {showLiveDialogue ? (
+              <LiveDialogue
+                quotation={quotation}
+                negotiations={negotiations}
+                events={events}
+              />
+            ) : null}
+
             <NegotiationMatrix
               quotationId={quotation.id}
+              quotationStatus={quotation.status}
               lines={lines}
               negotiations={negotiations}
               winnerNegotiationId={winnerNegId}
+              comparison={quotation.recommendationComparison}
             />
 
             {quotation.status === 'recommended' ||
             quotation.status === 'committed' ? (
-              <div className="mt-8">
-                <WhyThisWinner q={quotation} />
-              </div>
+              <WhyThisWinner q={quotation} />
             ) : null}
-          </>
+          </div>
         )}
       </div>
 
@@ -104,45 +113,6 @@ function RealWorkspace({ id }: { id: string }) {
       ) : null}
       {quotation.status === 'committed' ? <CommittedBar /> : null}
     </div>
-  );
-}
-
-function ParsingPanel({ status }: { status: string }) {
-  const messages: Record<string, { title: string; body: string }> = {
-    uploaded: {
-      title: 'Quote received',
-      body: 'About to open the file and read what the supplier sent.',
-    },
-    parsing: {
-      title: 'Parsing the quote',
-      body: 'Reading the spreadsheet, matching SKUs against the catalog, and resolving typos — usually around 30 seconds.',
-    },
-  };
-  const m = messages[status] ?? messages.parsing;
-  return (
-    <div className="mx-auto max-w-2xl rounded-xl border border-border bg-card p-8 text-center">
-      <div className="mx-auto flex size-12 items-center justify-center rounded-full bg-accent text-primary">
-        <FileSpreadsheet className="size-5" />
-      </div>
-      <h2 className="mt-4 font-display text-[20px] font-semibold tracking-tight text-foreground">
-        {m?.title}
-      </h2>
-      <p className="mt-1.5 text-[13px] text-muted-foreground">{m?.body}</p>
-      <div className="mx-auto mt-5 flex w-32 items-center justify-center gap-1.5">
-        <Dot delay={0} />
-        <Dot delay={150} />
-        <Dot delay={300} />
-      </div>
-    </div>
-  );
-}
-
-function Dot({ delay }: { delay: number }) {
-  return (
-    <span
-      className="size-1.5 animate-pulse rounded-full bg-primary"
-      style={{ animationDelay: `${delay}ms` }}
-    />
   );
 }
 
