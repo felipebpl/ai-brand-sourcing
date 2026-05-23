@@ -47,8 +47,11 @@ supabase/.branches/
 supabase/.temp/
 supabase/.env
 
-# claude worktrees (managed by claude code)
+# claude worktrees (managed by claude code) + optional local skill symlinks
 .claude/worktrees/
+.claude/skills/
+.claude/settings.local.json
+.claude/projects/
 
 # uploaded artifacts during dev
 apps/api/uploads/
