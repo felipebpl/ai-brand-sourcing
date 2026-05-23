@@ -1,4 +1,9 @@
-import { query, type Options, type SDKResultSuccess } from '@anthropic-ai/claude-agent-sdk';
+import {
+  query,
+  type AgentDefinition,
+  type Options,
+  type SDKResultSuccess,
+} from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import type {
   BrandAgentNegotiateInput,
@@ -12,6 +17,10 @@ import { modelFor, TaskAssignment } from '../model-router';
 import { makeCostGuardHook, makeTraceHooks } from '../hooks';
 import { PgSessionStore } from '../session-store.pg';
 import { renderBrandAgentSystemPrompt } from '../prompts/brand-agent';
+import {
+  PARSER_AGENT_PLACEHOLDER_DESCRIPTION,
+  PARSER_AGENT_PLACEHOLDER_PROMPT,
+} from '../prompts/parser-agent';
 
 /**
  * Brand agent adapter (Claude Agent SDK).
@@ -105,9 +114,67 @@ export class ClaudeBrandAgentAdapter implements BrandAgentPort {
     };
   }
 
+  /**
+   * Step 2 smoke method: invokes the parser subagent via the `Agent`
+   * tool and reports back what it said. Validates the Agent → subagent
+   * → return-result wiring end-to-end. Subagent prompt is currently a
+   * placeholder; Step 3 plugs in the real skill and tools.
+   */
+  async pingParser(args: {
+    quotationId: string;
+    brand: { id: string; name: string; positioningHypothesis: string };
+  }): Promise<PingParserResult> {
+    const systemPrompt = renderBrandAgentSystemPrompt({ brand: args.brand });
+    const userPrompt = [
+      'Invoke the parser subagent now via the Agent tool. Tell it that',
+      'this is a wiring test. After it replies, submit a structured',
+      'acknowledgement with the parser\'s final message verbatim in the',
+      '`parserMessage` field.',
+    ].join(' ');
+
+    const options = this.makeBaseOptions({
+      quotationId: args.quotationId,
+      systemPrompt,
+      taskTier: TaskAssignment.brandAgent,
+      outputSchema: PingParserAckJsonSchema,
+      maxTurns: 4,
+      maxBudgetUsd: 0.30,
+      agents: { parser: parserPlaceholderAgentDefinition },
+      tools: ['Agent'],
+      allowedTools: ['Agent'],
+    });
+
+    let success: SDKResultSuccess | undefined;
+    for await (const message of query({ prompt: userPrompt, options })) {
+      if (message.type === 'result' && message.subtype === 'success') {
+        success = message;
+      }
+    }
+
+    if (!success) {
+      throw new Error('pingParser did not yield a success result');
+    }
+
+    const parsed = PingParserAckSchema.safeParse(success.structured_output);
+    if (!parsed.success) {
+      throw new Error(
+        `pingParser returned an unexpected output shape: ${parsed.error.message}`,
+      );
+    }
+
+    return {
+      status: parsed.data.status,
+      parserMessage: parsed.data.parserMessage,
+      sessionId: success.session_id,
+      costUsd: success.total_cost_usd,
+      durationMs: success.duration_ms,
+      turns: success.num_turns,
+    };
+  }
+
   async negotiate(_input: BrandAgentNegotiateInput): Promise<Recommendation> {
     throw new Error(
-      'ClaudeBrandAgentAdapter.negotiate not implemented yet (Step 2+)',
+      'ClaudeBrandAgentAdapter.negotiate not implemented yet (Step 5)',
     );
   }
 
@@ -115,7 +182,7 @@ export class ClaudeBrandAgentAdapter implements BrandAgentPort {
     _input: BrandAgentReactInput,
   ): Promise<Recommendation> {
     throw new Error(
-      'ClaudeBrandAgentAdapter.reactToSupplierMessage not implemented yet (Step 2+)',
+      'ClaudeBrandAgentAdapter.reactToSupplierMessage not implemented yet (Step 5)',
     );
   }
 
@@ -126,6 +193,9 @@ export class ClaudeBrandAgentAdapter implements BrandAgentPort {
     outputSchema: Record<string, unknown>;
     maxTurns: number;
     maxBudgetUsd: number;
+    agents?: Record<string, AgentDefinition>;
+    tools?: string[];
+    allowedTools?: string[];
   }): Options {
     const traceHooks = makeTraceHooks({
       quotationId: args.quotationId,
@@ -145,8 +215,9 @@ export class ClaudeBrandAgentAdapter implements BrandAgentPort {
       systemPrompt: { type: 'preset', preset: 'claude_code', append: args.systemPrompt },
       settingSources: [],
       permissionMode: 'dontAsk',
-      tools: [],
-      allowedTools: [],
+      tools: args.tools ?? [],
+      allowedTools: args.allowedTools ?? [],
+      agents: args.agents,
       maxTurns: args.maxTurns,
       maxBudgetUsd: args.maxBudgetUsd,
       sessionStore: this.sessionStore,
@@ -159,6 +230,16 @@ export class ClaudeBrandAgentAdapter implements BrandAgentPort {
     } as Options;
   }
 }
+
+// -------- Subagent definitions ---------------------------------------------
+
+const parserPlaceholderAgentDefinition: AgentDefinition = {
+  description: PARSER_AGENT_PLACEHOLDER_DESCRIPTION,
+  prompt: PARSER_AGENT_PLACEHOLDER_PROMPT,
+  model: modelFor(TaskAssignment.parserAgent),
+  tools: [],
+  maxTurns: 2,
+};
 
 // -------- Bootstrap structured output ---------------------------------------
 
@@ -186,5 +267,31 @@ const BootstrapAckJsonSchema: Record<string, unknown> = {
     status: { type: 'string', enum: ['ok'] },
     message: { type: 'string', minLength: 1 },
     modelInUse: { type: 'string', minLength: 1 },
+  },
+};
+
+// -------- pingParser structured output -------------------------------------
+
+const PingParserAckSchema = z.object({
+  status: z.literal('ok'),
+  parserMessage: z.string().min(1),
+});
+
+export interface PingParserResult {
+  status: 'ok';
+  parserMessage: string;
+  sessionId: string;
+  costUsd: number;
+  durationMs: number;
+  turns: number;
+}
+
+const PingParserAckJsonSchema: Record<string, unknown> = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['status', 'parserMessage'],
+  properties: {
+    status: { type: 'string', enum: ['ok'] },
+    parserMessage: { type: 'string', minLength: 1 },
   },
 };
