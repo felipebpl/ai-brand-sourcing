@@ -60,3 +60,6 @@ apps/api/.storage/
 # misc
 .cache/
 .parcel-cache/
+
+# generated
+apps/web/src/routeTree.gen.ts
