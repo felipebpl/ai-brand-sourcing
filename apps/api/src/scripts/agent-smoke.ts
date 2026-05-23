@@ -1,8 +1,11 @@
 import { resolve } from 'node:path';
+import { eq } from 'drizzle-orm';
 import { db } from '../db';
+import { quotation, quotationLine } from '../db/schema';
 import { eventBus } from '../infra/agent-sdk/event-bus';
 import { ClaudeBrandAgentAdapter } from '../infra/agent-sdk/adapters/brand-agent.claude';
 import { ClaudeParserAdapter } from '../infra/agent-sdk/adapters/parser.claude';
+import { parseAndPersist } from '../quotations/pipeline';
 
 /**
  * Agent SDK smoke harness.
@@ -35,39 +38,74 @@ const brand = {
 
 const workspaceRoot = resolve(import.meta.dir, '../../../..');
 
-if (mode === 'parse') {
+if (mode === 'parse' || mode === 'parse-persist') {
   const fileArg = process.argv[3];
   if (!fileArg) {
-    console.error('Usage: bun agent:smoke parse <relative-or-absolute-path>');
+    console.error(
+      'Usage: bun agent:smoke parse-persist <relative-or-absolute-path>',
+    );
     process.exit(2);
   }
   const storageUri = fileArg.startsWith('/')
     ? fileArg
     : resolve(workspaceRoot, fileArg);
+  const uploadedFilename = fileArg.split('/').pop() ?? fileArg;
 
-  log(`Parsing real XLSX via parser subagent: ${storageUri}`);
+  // Create the quotation row first — in production this happens in the
+  // POST /quotations route at upload time. Inline here so the smoke
+  // covers the same DB lifecycle the real flow will.
+  const [inserted] = await db
+    .insert(quotation)
+    .values({
+      sourceSupplierId: 'supplier-1',
+      uploadedFilename,
+      storageUri,
+      userInstruction: null,
+      status: 'uploaded',
+    })
+    .returning({ id: quotation.id, status: quotation.status });
+
+  if (!inserted) {
+    console.error('Failed to insert quotation row');
+    process.exit(1);
+  }
+
+  log(`Created quotation row ${inserted.id} (status=${inserted.status})`);
+  log(`Running parseAndPersist pipeline against ${storageUri}`);
+
   const parser = new ClaudeParserAdapter({ db, eventBus, workspaceRoot });
-  const result = await parser.parse({
-    quotationId: QUOTATION_ID,
+  const outcome = await parseAndPersist({
+    db,
+    parser,
+    quotationId: inserted.id,
     storageUri,
-    uploadedFilename: fileArg.split('/').pop() ?? fileArg,
+    uploadedFilename,
     userInstruction: null,
   });
-  log('Parse result — top-level fields', {
-    supplierName: result.extraction.supplierName,
-    quoteId: result.extraction.quoteId,
-    issuedAt: result.extraction.issuedAt,
-    currency: result.extraction.currency,
-    leadTimeDays: result.extraction.leadTimeDays,
-    paymentTerms: result.extraction.paymentTerms,
-    language: result.extraction.language,
-    lineCount: result.extraction.lines.length,
-    ambiguityCount: result.extraction.ambiguities.length,
-  });
-  log('First 5 lines', result.extraction.lines.slice(0, 5));
-  if (result.extraction.ambiguities.length > 0) {
-    log('Ambiguities', result.extraction.ambiguities);
+
+  log('Pipeline outcome', outcome);
+
+  if (outcome.kind === 'parsed') {
+    // Verify by reading back from the DB exactly what's persisted.
+    const persistedRow = await db
+      .select()
+      .from(quotation)
+      .where(eq(quotation.id, inserted.id))
+      .limit(1);
+    const persistedLines = await db
+      .select()
+      .from(quotationLine)
+      .where(eq(quotationLine.quotationId, inserted.id));
+
+    log('Quotation row after persist', {
+      id: persistedRow[0]?.id,
+      status: persistedRow[0]?.status,
+      parsedMetadata: persistedRow[0]?.parsedMetadata,
+    });
+    log(`Persisted ${persistedLines.length} quotation_line rows`);
+    log('First 3 lines from DB', persistedLines.slice(0, 3));
   }
+
   log('Done.');
   process.exit(0);
 }
