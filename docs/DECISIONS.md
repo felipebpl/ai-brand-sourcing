@@ -209,6 +209,69 @@ flow treat single-supplier as the default.
 
 ---
 
+## ADR-013 — Parser as a dedicated subagent, not a skill on the brand agent
+
+**Status:** Accepted.
+
+**Decision:** The parser is a **separate Claude subagent** invoked by
+the brand agent via the SDK's `Agent` tool. The `quotation-parser`
+skill is loaded on the **parser subagent**, not on the brand agent.
+The brand agent has no filesystem access (`Bash`/`Read`/`Write`) — its
+toolset is `Agent` + `mcp__brand__*` only.
+
+**Rationale:**
+
+1. **Cost.** Parsing uses 5–15 Python turns over Bash. Sonnet 4.6 does
+   it with the same quality as Opus 4.7 at ~30% the cost. Concentrating
+   parsing in a subagent unlocks that saving cleanly.
+2. **Security surface.** Brand agent processes inbound `supplier.message`
+   events — natural-language content from outside the system, where
+   prompt-injection is a real concern. Not giving the brand agent
+   `Bash` is basic hygiene; the parser subagent runs `Bash` only on
+   files we control (uploaded quotations), with `cwd` scoped to the
+   workspace.
+3. **Context cleanliness.** Brand agent's context is already packed
+   (4 supplier conversations × N rounds × tool calls). Adding parsing
+   transcripts on top causes compaction earlier and burns cache. The
+   subagent runs in its own context window; the brand sees only the
+   structured `QuotationExtraction` result + `ambiguities[]`.
+4. **Separation of concerns.** Parsing is a closed task with a strict
+   output schema; negotiation is an open-ended dialogue. Modeling them
+   as separate agents with separate model tiers makes the design
+   easier to evolve.
+
+**Critically, this is NOT a "pipeline".** The parser subagent **is an
+agent** — with its own reasoning, iteration, tool use, and structured
+output. The distinction:
+
+| Approach | Agent-first? |
+|---|---|
+| TS pipeline with regex/extractors hardcoded | ❌ No |
+| Brand agent with skill loaded directly | ✅ Yes |
+| Parser invoked as subagent via `Agent` tool | ✅ Yes |
+
+We're picking the third because of the four reasons above — not
+because we want less agent. We want more focused agents.
+
+**Rejected alternatives:**
+
+- **Skill on the brand agent (Variant A):** simpler conceptually, but
+  forces Opus to do parsing (cost), exposes the brand agent to
+  filesystem tools (security), and inflates the brand's context.
+- **Standalone parser process via subprocess:** loses the agent-first
+  framing; we'd be reimplementing what `Agent` tool already gives us.
+
+**Implementation map:**
+- `apps/api/src/infra/agent-sdk/adapters/parser.claude.ts` — spawns the
+  subagent via `query()` (or registers it under the brand's `agents:`
+  map and invokes via `Agent` tool — implementation detail).
+- `apps/api/src/infra/agent-sdk/skills/quotation-parser/` — the skill
+  bundle (already scaffolded).
+- `apps/api/src/infra/agent-sdk/tools/lookup-catalog.ts` and
+  `submit-extraction.ts` — MCP tools the parser subagent uses.
+
+---
+
 ## Standing conventions (not ADRs)
 
 - Conventional commits (`feat:`, `fix:`, `chore:`, …).

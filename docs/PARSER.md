@@ -3,11 +3,19 @@
 The parser is a **Claude subagent** with the `quotation-parser` skill
 loaded. It receives a supplier XLSX, runs Python via Bash to read and
 analyze it, resolves SKUs against the catalog, and submits a typed
-`QuotationExtraction`.
+`QuotationExtraction`. See ADR-013 for the rationale.
 
 This is intentionally NOT a deterministic pipeline. The strength of the
 design is that Claude can reason about an unfamiliar layout the way a
 human analyst would: open the file, look around, try something, refine.
+
+> **Subagent, not pipeline.** "Agent-first" doesn't mean *one* agent —
+> it means agents reason about messy reality, not pipelines that
+> hardcode regexes. A focused parser subagent IS an agent. We chose
+> this over "skill loaded on the brand agent directly" for cost,
+> security, and context-isolation reasons (see ADR-013). The brand
+> agent invokes it via the SDK's `Agent` tool and receives the
+> typed result; it never sees the parser's tool-use turns.
 
 ## Components
 

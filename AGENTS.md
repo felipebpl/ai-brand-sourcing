@@ -33,6 +33,23 @@ Inngest workflow.
    for this trial).
 9. **`docs/GLOSSARY.md`** — naming conventions.
 
+## What "agent-first" means in this codebase
+
+"Agent-first" does NOT mean "one giant agent does everything." It means:
+
+| Pattern | Agent-first? |
+|---|---|
+| TS code with regex/extractors hardcoded | ❌ No |
+| LLM `query()` with tools that iterates over messy input | ✅ Yes |
+| Subagent invoked via `Agent` tool (focused, own context) | ✅ Yes |
+| Brand agent with skills loaded directly | ✅ Yes |
+
+We have **multiple focused agents** — brand (Opus, orchestrator), parser
+(Sonnet, with quotation-parser skill), supplier × 3 (Haiku, persona-
+driven). Each is genuinely an agent (reasons, uses tools, iterates),
+just specialized. The brand agent invokes others via the `Agent` tool
+when its task calls for it.
+
 ## Stable architecture
 
 | Area | Status |
