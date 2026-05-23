@@ -1,17 +1,21 @@
 import { EventSchemas, Inngest } from 'inngest';
 import type {
-  CurveballPayload,
-  ParsedLineItem,
   QuotationUploadedEvent,
+  SupplierMessageEvent,
+  PurchaseOrderRequestedEvent,
 } from '@app/shared';
 
+/**
+ * Inngest event-typed catalog.
+ *
+ * Three events drive the system. Two are user-driven specific payloads;
+ * `supplier/message` is the canonical free-form inbound channel for any
+ * supplier-side activity (including curveballs).
+ */
 type Events = {
   'quotation/uploaded': { data: QuotationUploadedEvent };
-  'quotation/parsed': { data: { quotationId: string; items: ParsedLineItem[] } };
-  'negotiation/curveball.sent': { data: CurveballPayload };
-  'purchase-order/requested': {
-    data: { quotationId: string; negotiationId: string };
-  };
+  'supplier/message': { data: SupplierMessageEvent };
+  'purchase-order/requested': { data: PurchaseOrderRequestedEvent };
 };
 
 export const inngest = new Inngest({

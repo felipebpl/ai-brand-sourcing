@@ -7,10 +7,15 @@ End-to-end walkthrough for a fresh machine.
 | Tool | Min version | Install |
 |---|---|---|
 | Bun | 1.2 | `curl -fsSL https://bun.sh/install \| bash` |
+| Python | 3.11 | `brew install python@3.11` (or pyenv) |
 | Docker Desktop | recent | https://docs.docker.com/desktop/ |
 | Supabase CLI | 2.x | `brew install supabase/tap/supabase` |
-| GitHub CLI | 2.x | `brew install gh` |
-| An Anthropic API key | n/a | https://console.anthropic.com |
+| GitHub CLI | 2.x (optional) | `brew install gh` |
+| Anthropic API key | n/a | https://console.anthropic.com |
+
+> macOS note: keep the repo **outside** of `~/Documents/` (which is TCC-
+> protected). A path like `~/code/personal/projects/ai-brand-sourcing/`
+> avoids the EPERM hell.
 
 ## 1. Clone + install
 
@@ -20,49 +25,63 @@ cd ai-brand-sourcing
 bun install
 ```
 
-## 2. Configure environment
+## 2. Python venv for the parser agent
+
+The parser agent invokes Python via Bash. Create a local venv and install
+the dependencies:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+Activate `.venv` in every shell that runs the API (or set up
+direnv/auto-activation).
+
+## 3. Configure environment
 
 ```bash
 cp .env.example .env
-# Open .env and set ANTHROPIC_API_KEY
+# Open .env and set ANTHROPIC_API_KEY (required)
 ```
 
-## 3. Boot Postgres
+The default `DATABASE_URL` matches Supabase CLI's local Postgres
+defaults.
+
+## 4. Boot Postgres
 
 ```bash
 bun db:start
-# Note the "DB URL" Supabase prints — should look like
-#   postgresql://postgres:postgres@127.0.0.1:54322/postgres
-# It already matches the .env default.
 ```
 
-Supabase Studio is at http://127.0.0.1:54323. Use it to inspect tables and
-data.
+Supabase Studio is at http://127.0.0.1:54323. Use it to inspect tables
+and data.
 
-## 4. Push the schema
+## 5. Push the schema
 
 ```bash
 bun db:push
 ```
 
 The schema lives in `apps/api/src/db/schema.ts`. In local dev we use
-`push` mode (no migration files). When the schema stabilizes we'll switch
-to `generate` + `migrate`.
+`push` mode (no migration files). The `pg_trgm` extension is enabled
+automatically.
 
-## 5. Run
+## 6. Run
 
-Three terminals (or use `bun dev` to run api + web in parallel):
+Three terminals (or `bun dev` to run api + web in parallel):
 
 ```bash
 # T1 — API
 bun dev:api          # http://localhost:3000
-                     #   /docs        Swagger UI
-                     #   /health      health probe
+                     #   /docs         Swagger UI
+                     #   /health       health probe
                      #   /openapi.json
                      #   /api/inngest
 
 # T2 — Inngest dev server
-bun dev:inngest      # http://localhost:8288  — Inngest workflow UI
+bun dev:inngest      # http://localhost:8288 — Inngest workflow UI
 
 # T3 — Web
 bun dev:web          # http://localhost:5173
@@ -71,22 +90,25 @@ bun dev:web          # http://localhost:5173
 > Boot order matters: the Inngest CLI polls the `-u` URL to discover
 > functions, so the API must be up *first*.
 
-## 6. Verify
+## 7. Verify
 
 - http://localhost:3000/health → `{"status":"ok","checks":{"database":"ok"}}`
-- http://localhost:3000/docs → Swagger UI lists `/health` and the inngest
-  handler.
-- http://localhost:5173 → Web app boots, makes a request to `/health` and
-  prints the result.
-- http://localhost:8288 → Inngest dashboard shows the `ai-brand-sourcing`
-  app connected (no functions yet — they're TBD).
+- http://localhost:3000/docs → Swagger UI lists routes.
+- http://localhost:5173 → Web app boots and reports API health.
+- http://localhost:8288 → Inngest dashboard shows `ai-brand-sourcing`
+  app connected (no functions yet during scaffolding; they fill in as
+  we implement).
 
 ## Troubleshooting
 
-- **`DATABASE_URL is not set`** — you didn't copy `.env.example` to `.env`.
-- **`supabase start` hangs** — Docker isn't running, or another container
-  holds port 54322. Try `bun db:stop` first.
-- **Inngest dashboard shows "app disconnected"** — restart the CLI; it
-  re-polls every few seconds.
-- **CORS errors in the browser** — confirm `VITE_API_BASE_URL` in `.env`
-  matches the API's actual port.
+- **`DATABASE_URL is not set`** — copy `.env.example` to `.env`.
+- **`supabase start` hangs or fails on storage container** —
+  `supabase/config.toml` ships with `[storage] enabled = false` to
+  sidestep a known macOS-arm64 health-check issue.
+- **`python: command not found`** when the parser agent runs — make
+  sure `.venv` is activated in the shell running `bun dev:api`.
+- **CORS in browser** — confirm `VITE_API_BASE_URL` in `.env` matches
+  the API's port.
+- **TCC EPERM on macOS** — repo should live in `~/code/...`, not
+  `~/Documents/...`. macOS protects Documents and silently revokes
+  process grants.

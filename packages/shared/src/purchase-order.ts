@@ -11,28 +11,32 @@ export const PurchaseOrderStatusSchema = z.enum([
 ]);
 export type PurchaseOrderStatus = z.infer<typeof PurchaseOrderStatusSchema>;
 
-export const PurchaseOrderLineItemSchema = z.object({
+export const PurchaseOrderLineSchema = z.object({
+  id: z.string().uuid(),
+  quotationLineId: z.string().uuid(),
   productSku: z.string(),
   description: z.string(),
-  quantity: z.number().positive(),
+  quantity: z.number().int().positive(),
   unitPrice: z.number().nonnegative(),
   lineTotal: z.number().nonnegative(),
 });
-export type PurchaseOrderLineItem = z.infer<typeof PurchaseOrderLineItemSchema>;
+export type PurchaseOrderLine = z.infer<typeof PurchaseOrderLineSchema>;
 
 export const PurchaseOrderSchema = z.object({
   id: z.string().uuid(),
   poNumber: z.string(),
+  brandId: z.string(),
   supplierId: SupplierIdSchema,
-  negotiationId: z.string().uuid(),
   quotationId: z.string().uuid(),
+  negotiationId: z.string().uuid(),
   status: PurchaseOrderStatusSchema,
   currency: CurrencySchema,
-  lineItems: z.array(PurchaseOrderLineItemSchema),
+  lines: z.array(PurchaseOrderLineSchema),
   subtotal: z.number().nonnegative(),
   totalAmount: z.number().nonnegative(),
   leadTimeDays: z.number().int().nonnegative(),
   paymentTerms: PaymentTermsSchema,
+  expectedDeliveryDate: z.string().datetime().nullable(),
   issuedAt: z.string().datetime(),
 });
 export type PurchaseOrder = z.infer<typeof PurchaseOrderSchema>;

@@ -2,130 +2,218 @@
 
 ## One-paragraph summary
 
-A user uploads an XLSX quotation through the React UI. The API stores the file,
-records a `Quotation` row, and dispatches an Inngest event. An Inngest workflow
-parses the XLSX into structured line items (LLM + structured outputs), matches
-SKUs against the product catalog, and then fans out three parallel
-`Negotiation` runs — one per simulated alternate supplier — each driven by an
-AI agent. While the negotiations run they stream tokens into an in-process bus;
-an SSE endpoint relays those deltas to the UI. When the first round finishes,
-the workflow waits up to N minutes for a `curveball` event (e.g. "Supplier 2
-can only fulfill 60%"). If the event fires, the workflow re-evaluates by
-running a second round of negotiation informed by the new constraint. A brand
-agent then selects a winner (potentially split-sourcing across two suppliers)
-with reasoning. The user reviews the recommendation and clicks "Convert to PO";
-the API materializes a `PurchaseOrder` row plus line items and surfaces it in
-the global PO list.
+A user uploads an XLSX quotation through the React UI. The API stores the
+file, inserts a `quotation` row, and emits `quotation.uploaded` to Inngest.
+A handler runs the **brand agent** (the orchestrating intelligence — Claude
+Opus 4.7), which invokes the **parser agent** (a subagent with the
+`quotation-parser` skill loaded — Claude Sonnet 4.6 running Python via
+Bash) to extract structured line items, resolves SKUs against the product
+catalog (Postgres `pg_trgm` fuzzy lookup), opens 4 parallel
+**negotiations** (one per supplier — the source supplier is renegotiable,
+plus 3 simulated counterparts), conducts a multi-round dialogue, then
+emits a **recommendation** with reasoning. The user clicks "Convert to PO"
+to materialize a Purchase Order. At any point in the life of the system,
+a `supplier.message` event (generic curveball channel) can land and
+trigger a re-evaluation — the brand agent decides whether to keep the
+current recommendation, swap winner, or renegotiate.
 
 ## Topology
 
 ```
-┌─────────────────┐         ┌──────────────────────────────────────────────┐
-│ apps/web (Vite) │  REST   │ apps/api (Hono on Bun)                       │
-│ React + shadcn  │ ──────▶ │  ├── /quotations (POST upload)               │
-│ TanStack Query  │  SSE    │  ├── /quotations/:id (GET, status, items)    │
-│                 │ ◀────── │  ├── /quotations/:id/stream  ◀── SSE         │
-│                 │         │  ├── /quotations/:id/curveball (POST)        │
-│                 │         │  ├── /purchase-orders (GET list, POST issue) │
-│                 │         │  ├── /docs  (Swagger UI)                     │
-│                 │         │  └── /api/inngest   (Inngest handler)        │
-└─────────────────┘         └──────────────┬───────────────────────────────┘
-                                           │
-              ┌────────────────────────────┴───────────────────────────┐
-              ▼                                                        ▼
-     ┌──────────────────┐                                  ┌────────────────────┐
-     │ Inngest DevSrv   │                                  │ Postgres (Supabase)│
-     │ Workflow runner  │   ──── drizzle ──────────────▶   │ quotation,         │
-     │ + DAG UI         │                                  │ parsed_item,       │
-     └──────────────────┘                                  │ product_catalog,   │
-              │                                            │ supplier,          │
-              ▼                                            │ negotiation,       │
-     ┌──────────────────────────────┐                      │ negotiation_message│
-     │ Inngest workflow steps       │                      │ winner_selection,  │
-     │  1. parseXlsx                │                      │ purchase_order,    │
-     │  2. matchCatalog             │                      │ purchase_order_li.. │
-     │  3. negotiate (× 3 parallel) │                      └────────────────────┘
-     │  4. waitForEvent(curveball)  │
-     │  5. replan (× 3 if needed)   │
-     │  6. selectWinner             │
-     │  7. (on confirm) issuePO     │
-     └──────────────┬───────────────┘
-                    │
-                    ▼
-         ┌────────────────────────────────────────┐
-         │ AI Agents (TBD framework — ADR-001)    │
-         │  brand-agent      ↔  3 supplier agents │
-         │  (Claude Sonnet 4.6 default;           │
-         │   Opus 4.7 for winner reasoning)       │
-         └────────────────────────────────────────┘
+┌─────────────────┐         ┌────────────────────────────────────────────────┐
+│ apps/web (Vite) │  REST   │ apps/api (Hono on Bun)                         │
+│ React + shadcn  │ ──────▶ │  ├── POST /quotations    (upload)              │
+│ TanStack Query  │  SSE    │  ├── POST /supplier-messages (curveball UI)    │
+│                 │ ◀────── │  ├── POST /purchase-orders   (convert button)  │
+│                 │         │  ├── GET  /quotations/:id                      │
+│                 │         │  ├── GET  /quotations/:id/stream  (SSE)        │
+│                 │         │  ├── GET  /purchase-orders                     │
+│                 │         │  ├── /docs (Swagger), /openapi.json            │
+│                 │         │  └── /api/inngest (Inngest handler)            │
+└─────────────────┘         └─────────────────┬──────────────────────────────┘
+                                              │
+                ┌─────────────────────────────┴───────────────────────────────┐
+                ▼                                                             ▼
+       ┌──────────────────────┐                                  ┌───────────────────┐
+       │ Inngest event-driven │                                  │ Postgres          │
+       │ functions:           │                                  │ (Supabase local)  │
+       │  • handle.quotation- │   ◀── drizzle ──────────────▶   │ ext: pg_trgm      │
+       │    uploaded          │                                  │                   │
+       │  • handle.supplier-  │                                  │ tables:           │
+       │    message           │                                  │ • product         │
+       │  • handle.po-        │                                  │ • supplier        │
+       │    requested         │                                  │ • quotation       │
+       │                      │                                  │ • quotation_line  │
+       │ idempotency=hash(...)│                                  │ • negotiation     │
+       └──────────┬───────────┘                                  │ • negotiation_msg │
+                  │                                              │ • purchase_order  │
+                  ▼                                              │ • po_line         │
+       ┌────────────────────────────────────────────┐            └───────────────────┘
+       │ Claude Agent SDK adapters                  │
+       │  (src/infra/agent-sdk/)                    │
+       │   ┌───────────────────────────────────┐    │
+       │   │ Brand Agent (Opus 4.7)            │    │
+       │   │   tools: Agent + mcp__brand__*    │    │
+       │   │   subagents: supplier-1..4        │    │
+       │   │   loop: parallel Agent calls per  │    │
+       │   │     round, decides stopping       │    │
+       │   │   output: Recommendation          │    │
+       │   └─────────────┬─────────────────────┘    │
+       │                 │                          │
+       │   ┌─────────────▼─────────────┐            │
+       │   │ Parser Agent (Sonnet 4.6) │            │
+       │   │   skill: quotation-parser │            │
+       │   │   tools: Bash, Read,      │            │
+       │   │     mcp__parser__*        │            │
+       │   │   Python via Bash for     │            │
+       │   │     openpyxl/pandas       │            │
+       │   └───────────────────────────┘            │
+       │                                            │
+       │   ┌─────────────────────────────────────┐  │
+       │   │ Supplier Agents × 4 (Haiku 4.5)     │  │
+       │   │   one per supplier persona          │  │
+       │   │   information-asymmetric (each      │  │
+       │   │     sees only its own history)      │  │
+       │   │   tool: mcp__supplier__respond      │  │
+       │   └─────────────────────────────────────┘  │
+       └────────────────────────────────────────────┘
+
+       UI streaming bus:
+       Hooks (PreToolUse, PostToolUse) → in-process EventBus → Hono SSE
 ```
 
 ## Layers and responsibility
 
 | Layer | Owns | Does NOT own |
 |---|---|---|
-| `apps/web` | UI rendering, optimistic state, SSE consumption, UX flow | Business rules, validation |
-| `apps/api/src/routes` | HTTP transport, request/response shape, status codes | Computation, agents |
-| `apps/api/src/services` | Pure-ish business logic: XLSX parse, catalog match, scoring | Persistence specifics, HTTP |
-| `apps/api/src/inngest` | Workflow orchestration, step memoization, fan-out, suspend/resume | Agents themselves |
-| `apps/api/src/agents` | LLM calls, prompts, persona definitions, streaming | DB writes (delegated to services) |
+| `apps/web` | UI rendering, SSE consumption, UX flow | Business rules |
+| `apps/api/src/routes` | HTTP transport, request/response shape | Computation, agents |
+| `apps/api/src/domain` | Pure types + ports (interfaces) | Implementations |
+| `apps/api/src/infra/agent-sdk` | Every line that touches `@anthropic-ai/claude-agent-sdk` | Domain logic |
+| `apps/api/src/inngest/functions` | Workflow orchestration (event-triggered durable execution) | Agents themselves |
 | `apps/api/src/db` | Drizzle schema, the typed `db` instance | Anything else |
-| `packages/shared` | Zod schemas, event types, enums shared across tiers | Runtime code beyond schemas |
+| `packages/shared` | Zod schemas, event types | Runtime beyond schemas |
+
+## Event catalog
+
+Three Inngest events drive the system. Two are user-driven (specific
+payloads); one is the canonical **supplier-side channel** (generic free-
+form message, parsed by the brand agent).
+
+| Event | Trigger | Handler |
+|---|---|---|
+| `quotation.uploaded` | User upload via UI | `handle.quotation-uploaded` — parse → negotiate → recommend |
+| `supplier.message` | UI form simulating any inbound (curveball case) OR future email/webhook | `handle.supplier-message` — brand agent re-evaluates |
+| `purchase-order.requested` | User clicks "Convert to PO" | `handle.po-requested` — materialize PO row + lines |
+
+**No event for "curveball" specifically.** Curveballs (`Supplier 2 can
+only fulfill 60%`) are a particular `supplier.message` whose content is a
+natural-language note — the brand agent interprets the delta and decides
+whether to keep, swap, or renegotiate. New curveball flavors (price
+changes, lead time slips, walk-aways) cost zero new code — just new
+content in the same event.
 
 ## Data flow: the happy path
 
-1. **Upload.** `POST /quotations` accepts a multipart file. The API saves it
-   under `apps/api/.storage/`, inserts a `quotation` row with status
-   `uploaded`, and emits `quotation/uploaded`.
-2. **Parse.** Inngest step `parseXlsx` reads the file, runs the parser
-   pipeline (see [PARSER.md](PARSER.md)), writes `parsed_item` rows, sets
-   status to `parsed`.
-3. **Match.** Step `matchCatalog` runs hybrid SKU matching against
-   `product_catalog`. Persists `matched_sku`, `match_confidence`,
-   `match_method` on each `parsed_item`. Sets status to `matched`.
-4. **Negotiate (3 in parallel).** For each of the three suppliers, step
-   `negotiate-${supplierId}` creates a `negotiation` row, runs the agent loop
-   (multiple turns), persists messages + offers, and returns the final
-   `NegotiationOutcome`. Status becomes `negotiating`.
-5. **Wait for curveball.** `step.waitForEvent('negotiation/curveball.sent',
-   timeout: '30m')`. If the event arrives, all three negotiations re-run with
-   the new constraint as part of their context.
-6. **Pick winner.** Step `selectWinner` calls the brand agent (analytical
-   model — Opus) with all three outcomes + the user's instruction + supplier
-   quality ratings. Returns `WinnerSelection` (possibly split-sourcing).
-   Persists `winner_selection`. Status becomes `awaiting_decision`.
-7. **Issue PO.** User clicks the convert button. `POST /purchase-orders`
-   inserts a `purchase_order` row + line items derived from the winning
-   offer. Status becomes `completed`. The PO list pages reflect it.
+1. **Upload.** `POST /quotations` accepts a multipart file. The API saves
+   it under the configured storage path (local fs by default), inserts a
+   `quotation` row with status `uploaded`, and emits `quotation.uploaded`.
+
+2. **Parse.** Brand agent boots, invokes parser agent via
+   `Agent('parser', filePath)`. Parser agent runs Python via Bash, reads
+   the XLSX iteratively (using `openpyxl`), resolves raw SKUs via
+   `lookup_catalog` tool, and calls `submit_extraction` to return a
+   typed `QuotationExtraction`. `quotation_line` rows persisted. Status
+   becomes `parsed`.
+
+3. **Negotiate.** Brand agent opens 4 negotiations (one per supplier
+   including the source supplier — renegotiable). For each round:
+   parallel `Agent('supplier-N', brandAsk)` calls. Each supplier agent
+   sees only its own history (information asymmetry preserved). Brand
+   evaluates responses, decides whether to push another round or to
+   conclude. Status becomes `negotiating`.
+
+4. **Recommend.** Brand agent submits a `Recommendation` (single winner
+   in this scope per the team's guidance — split-sourcing not modeled
+   first-class but possible via the curveball replan flow). Comparison
+   matrix + reasoning saved in `quotation`. Status becomes `recommended`.
+
+5. **Curveball (optional, can happen any time).** If a `supplier.message`
+   event arrives — at any point during the run, after recommendation,
+   or even after PO if we wanted to model that — `handle.supplier-message`
+   re-invokes the brand agent with the new context. Brand agent decides:
+   keep / swap / renegotiate. Previous recommendation pushed into
+   `quotation.recommendation_history`; new one becomes current.
+
+6. **Convert to PO.** User clicks "Convert to PO" → `POST /purchase-
+   orders` → emits `purchase-order.requested`. Handler reads the current
+   recommendation, materializes a `purchase_order` + `purchase_order_line`
+   rows (each line references the originating `quotation_line_id` for
+   end-to-end traceability). Status becomes `committed`. PO shows up in
+   the global PO list.
+
+## Why this shape
+
+- **Brand agent IS the orchestrator** — not a hidden imperative loop in
+  TypeScript. It plans, decides number of rounds, chooses winner, reacts
+  to events. Inngest is durable wrap, not micro-orchestrator.
+- **Subagents from the Agent SDK** model supplier conversations
+  naturally; each `Agent()` call is fire-and-forget per round, exactly
+  the pattern Anthropic recommends for multi-agent (info asymmetric)
+  flows.
+- **Custom skill carries domain context**, not Excel mechanics. Claude
+  already knows how to run `openpyxl` via Bash — the skill teaches it
+  about *this brand's* quotations.
+- **Event-driven beats stepped flow** — a `supplier.message` is a real
+  inbound event, not a hardcoded `step.waitForEvent`. Handles arbitrary
+  reactive flows over the system's lifetime without code changes.
+- **Port-and-Adapters keeps the framework swappable** — domain stays
+  pure, all SDK touchpoints localized to `infra/agent-sdk/`.
 
 ## Streaming agents to the UI
 
-Inngest steps are durable request/response — you cannot stream out of them.
-The pattern this project uses:
+Inngest steps are durable request/response — you cannot stream out of
+them. Pattern:
 
-1. Inside an Inngest step, an agent run streams tokens from Claude.
-2. As each token chunk arrives, the agent publishes a `AgentDelta` event to an
-   **in-process `agentMessageBus`** keyed by `quotationId`.
-3. A Hono route, `GET /quotations/:id/stream`, opens an SSE connection and
-   subscribes to the bus for that id, relaying every event downstream.
-4. The frontend opens a single `EventSource` per quotation and the
-   `useNegotiationStream` hook merges deltas into TanStack Query cache.
-5. When the step finishes, only the durable, structured result (the final
-   `Offer` / `Outcome`) is returned from `step.run`. Stream contents are
-   ephemeral and saved as `negotiation_message` rows in the DB for replay.
+1. Inside an Inngest step, agent activity streams tokens.
+2. Lifecycle hooks (`PreToolUse`, `PostToolUse`, plus token-level events
+   from `includePartialMessages: true`) publish `AgentEvent` to an
+   **in-process EventBus** keyed by `quotation_id`.
+3. `GET /quotations/:id/stream` (Hono SSE) subscribes to the bus and
+   relays events to the frontend.
+4. Frontend `useNegotiationStream(quotationId)` opens an `EventSource`
+   and merges events into TanStack Query cache.
+5. The step persists only the durable, structured result to DB
+   (`Recommendation`, `quotation_line[]`, etc.). Stream contents are
+   ephemeral.
 
 ## Replay and idempotency
 
-- Inngest steps are deterministic memos. Side effects (DB writes, LLM calls)
-  always go *inside* `step.run`, never around it.
-- Each negotiation message carries an explicit `turn` index so replays land in
-  the same order.
-- The agent prompts include the negotiation history pulled from
-  `negotiation_message`. That makes reasoning auditable and survives restarts.
+- Inngest steps are deterministic memos. Side effects (DB writes, LLM
+  calls) always inside `step.run`, never around.
+- Idempotency key on `handle.quotation-uploaded`: `sha256(file_bytes) +
+  parser_version`. Re-upload = no duplicate work.
+- `negotiation_message.turn_index` is explicit so replays land in order.
+- Brand agent state survives across handlers via custom `SessionStore`
+  (Postgres) — Inngest worker can be on a different host between events.
+
+## Local-only setup
+
+This is a clone-and-run trial. No Docker for the app itself — just Bun.
+The only Docker dependency is the Supabase CLI (one-shot Postgres+Studio).
+Python (`openpyxl`, `pandas`) is installed in a local venv that the parser
+agent invokes via `Bash`. See [SETUP.md](SETUP.md).
+
+For production scale considerations (Cloud Run, batch APIs, hot-path
+caching), see [SCALING.md](SCALING.md) — explicitly out of scope for the
+trial.
 
 ## Out of scope (this work trial)
 
-- Authentication / multi-tenant separation
-- Production hardening (rate limits, retries beyond Inngest defaults)
-- Real supplier integrations (the three suppliers are LLM-simulated)
-- Currency conversion across quotations
+- Authentication / multi-tenant separation (single hardcoded brand `valden`).
+- Real supplier integrations (suppliers are LLM-simulated).
+- Currency conversion across quotations.
+- Split-sourcing as first-class output (per team guidance — modeled only
+  as an option the brand agent can choose during curveball replan).
+- Long-term performance tracking of suppliers (schema is prepared via
+  nullable fields but not populated).

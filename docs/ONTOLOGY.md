@@ -1,136 +1,201 @@
 # Ontology
 
-The single source of truth for domain vocabulary. If a term appears in code,
-prompts, or UI copy, it should match its definition here.
+Domain vocabulary — the source of truth for naming across code, prompts,
+and UI copy. The DB schema in `apps/api/src/db/schema.ts` is the
+authoritative shape; this file explains the intent.
 
-## Entities
+## Entities (8)
 
-### Quotation
+### Product
 
-A supplier-uploaded XLSX file representing a commercial proposal. It is the
-**input** to the system. Always has a `sourceSupplierId` (the supplier who
-sent it).
-
-| Field | Type | Notes |
-|---|---|---|
-| id | uuid | |
-| uploadedFilename | string | original filename, for audit |
-| sourceSupplierId | string | supplier id who sent it |
-| userInstruction | string \| null | free text — e.g. "prioritize lead time" |
-| status | QuotationStatus | see below |
-| extraction | jsonb | full structured extraction once parsed |
-
-`QuotationStatus`: `uploaded → parsing → parsed → matched → negotiating →
-awaiting_decision → completed | failed`.
-
-### ParsedItem
-
-A single line in a Quotation, after structured extraction.
+Master data for the brand's product catalog. Seeded from
+`assets/products.csv` (~10k SKUs for Valden).
 
 | Field | Type | Notes |
 |---|---|---|
-| rawSku | string \| null | as it appeared in the XLSX |
-| description | string | always present |
-| quantity, unitPrice, lineTotal, unit, currency | numeric/string | |
-| matchedSku | string \| null | post-matching, references `productCatalog.sku` |
-| matchConfidence | numeric(0..1) \| null | |
-| matchMethod | `exact` \| `bm25` \| `embedding` \| `llm_judge` \| `manual` |
-| rawConfidence | numeric(0..1) \| null | extractor's self-reported confidence |
-
-### ProductCatalog
-
-The brand's source of truth for SKUs. Seeded from `assets/products.csv`.
+| sku | text PK | e.g. `OB007-BAS-L`, `OPP010-SRD-28-26` |
+| brand_id | text | default `valden`; multi-tenant ready |
+| name | text | e.g. "Thermo Mesh Crew" |
+| color | text \| null | e.g. "Basalt Grey" |
+| attributes | jsonb | future enrichment (material, weight, compliance, etc.) |
 
 ### Supplier
 
-A counterparty. Three are simulated by AI agents (see [NEGOTIATION.md]).
+The counterparty. Source supplier (who uploaded the XLSX) plus three
+simulated counterparts; all are renegotiable, so the source has its
+own agent persona too.
 
 | Field | Type | Notes |
 |---|---|---|
-| id | string | `supplier-1`, `supplier-2`, `supplier-3` |
-| qualityScore | numeric(0..5) | persistent quality rating |
-| defaultLeadTimeDays | int | starting point |
-| defaultPaymentTerms | jsonb | e.g. `[{percent: 100, dueDays: 0}]` |
-| persona | string | system-prompt fragment defining the agent's stance |
-| pricingProfile | string | `cheap`, `mid`, `premium` |
+| id | text PK | `supplier-1`, `supplier-2`, … |
+| name | text | display name |
+| quality_score | numeric(3,2) | 0–5 (per challenge brief) |
+| default_lead_time_days | int | starting position |
+| default_payment_terms | jsonb | starting position |
+| persona | text | system-prompt fragment driving the supplier agent |
+| pricing_profile | text | `cheap` \| `mid` \| `premium` |
+| reliability_score | float \| null | ML-populated future field |
+| on_time_delivery_rate | float \| null | future field |
+
+### Quotation
+
+One row per supplier-uploaded file. **Carries the embedded recommendation**
+once the brand agent decides — no separate `winner_selection` table.
+
+| Field | Type | Notes |
+|---|---|---|
+| id | uuid PK | |
+| brand_id | text | default `valden` |
+| source_supplier_id | fk → supplier | who sent it |
+| uploaded_filename | text | original filename |
+| storage_uri | text | path/url where the bytes live |
+| user_instruction | text \| null | free-form note from upload form |
+| user_instruction_intent | jsonb \| null | structured projection: `{ priority, constraints }` |
+| parsed_metadata | jsonb \| null | currency, lead time, payment terms, language, etc. |
+| status | enum | `uploaded` → `parsing` → `parsed` → `negotiating` → `recommended` → `committed` (or `cancelled`/`failed`) |
+| recommended_negotiation_id | fk → negotiation \| null | the current winning negotiation |
+| recommendation_reasoning | text \| null | brand agent's natural-language justification |
+| recommendation_comparison | jsonb \| null | supplier × dimension comparison matrix |
+| recommended_at | timestamptz \| null | when the recommendation was made |
+| recommendation_history | jsonb[] | superseded recommendations (curveball replans) |
+
+### QuotationLine
+
+Atomic unit of a quotation. Tier pricing (whether expressed as duplicated
+rows or as multiple price columns) is unified via `min_qty`/`max_qty`.
+
+| Field | Type | Notes |
+|---|---|---|
+| id | uuid PK | |
+| quotation_id | fk → quotation | |
+| raw_sku | text \| null | as it appeared in the file |
+| raw_description | text \| null | as it appeared |
+| min_qty | int | tier lower bound |
+| max_qty | int \| null | tier upper bound (null = open-ended) |
+| unit_price | numeric(14,4) | |
+| currency | text | ISO 4217 |
+| matched_sku | fk → product \| null | resolved SKU |
+| match_confidence | numeric(4,3) \| null | 0..1 |
+| match_method | text \| null | `agent_exact` \| `agent_fuzzy_inferred` \| `agent_uncertain` |
+| match_reasoning | text \| null | one-line natural-language justification |
+| source_ref | jsonb \| null | `{sheet, row, col}` for traceback |
+| raw_extras | jsonb \| null | discount %, source-specific fields |
 
 ### Negotiation
 
-A multi-turn dialogue between the brand agent and one supplier agent.
-Outcome is a `NegotiationOutcome` (final offer + rationale + quality + total
-cost) which feeds the `WinnerSelection`.
-
-### NegotiationMessage
-
-A single turn in a `Negotiation`. Role is `brand`, `supplier`, or `system`.
-Stores both human-readable `content` and the structured `offer` when present.
-
-### NegotiationOffer
-
-A structured commercial proposal:
-
-```ts
-{
-  productSku: string,
-  quantity: number,
-  unitPrice: number,
-  leadTimeDays: number,
-  paymentTerms: { installments: { percent, dueDays }[], display: string },
-  currency: 'USD' | 'BRL' | 'EUR',
-  fulfillablePercent: number,  // 1.0 = full order; 0.6 = curveball case
-  validUntil: string | null,
-}
-```
-
-### WinnerSelection
-
-The brand agent's verdict at the end of negotiation. May be **single-source**
-(one supplier wins outright) or **split-sourced** (e.g. 60% from S2 because of
-quality + 40% from S3 because of lead time).
-
-```ts
-{
-  primary: NegotiationOutcome,
-  splitWith: NegotiationOutcome[],
-  reasoning: string,
-  tradeoffs: string[],
-}
-```
-
-### PurchaseOrder
-
-The durable commitment. Produced when the user clicks "Convert to PO" on a
-`WinnerSelection`. In a real system this triggers supplier notification,
-inventory locks, and payment workflows — we model it as a real commit action
-even though those downstream effects are out of scope.
+One thread per `(quotation, supplier)`. 4 per quotation
+(source-supplier renegotiable too).
 
 | Field | Type | Notes |
 |---|---|---|
-| id | uuid | |
-| poNumber | string | human-readable, e.g. `PO-2026-0042` |
-| quotationId, negotiationId, supplierId | fk | provenance |
-| status | PurchaseOrderStatus | `draft → issued → acknowledged → fulfilled` |
-| currency, subtotal, totalAmount | num | |
-| leadTimeDays | int | |
-| paymentTerms | jsonb | |
-| lineItems | rel | child rows in `purchase_order_line_item` |
+| id | uuid PK | |
+| quotation_id | fk → quotation | |
+| supplier_id | fk → supplier | |
+| status | enum | `pending` → `active` → `concluded` (or `stalled`/`failed`) |
+| final_unit_price_avg | numeric \| null | denormalized at conclusion |
+| final_lead_time_days | int \| null | denormalized |
+| final_payment_terms | jsonb \| null | denormalized |
+| rounds_count | int | for analytics |
+| price_concession_pct | float \| null | (initial − final) / initial |
+| negotiation_duration_seconds | int \| null | wall-clock |
+| winning_dimensions | text[] \| null | `['price','lead_time']` etc. |
+| created_at, concluded_at | timestamptz | |
 
-## Naming conventions
+Outcome metrics are stored denormalized so future ML pipelines can
+query analytics directly without replaying message history.
 
-- **Entities**: PascalCase singular (`Quotation`, not `Quotations`).
-- **Tables**: snake_case singular (`quotation`, `parsed_item`).
-- **Enum values**: snake_case (`awaiting_decision`).
-- **Files holding multiple related schemas**: kebab-case singular
-  (`packages/shared/src/purchase-order.ts`).
-- **Currency**: ISO 4217 three-letter (`USD`, `BRL`, `EUR`). Always uppercase.
-- **Money**: stored as `numeric(14,4)` in Postgres. Converted at the boundary.
-- **Time**: `timestamp with time zone`, always UTC.
+### NegotiationMessage
+
+A turn in a negotiation thread.
+
+| Field | Type | Notes |
+|---|---|---|
+| id | uuid PK | |
+| negotiation_id | fk → negotiation | |
+| role | enum | `brand` \| `supplier` \| `system` |
+| turn_index | int | monotonic per negotiation |
+| content | text | natural language |
+| offer | jsonb \| null | structured snapshot of the proposal at this turn |
+| metadata | jsonb \| null | model used, inferred intent, event_type for system msgs |
+| created_at | timestamptz | |
+
+**System messages** are used to inject events into a thread (e.g. a
+`supplier.message` event arrives — a system message is inserted with
+`metadata.event_type = 'supplier_message_received'` for audit).
+
+### PurchaseOrder
+
+The committed deal. Immutable after `issued` (forward-only state machine
+except for `cancelled`).
+
+| Field | Type | Notes |
+|---|---|---|
+| id | uuid PK | |
+| po_number | text unique | `PO-2026-0001` |
+| brand_id | text | |
+| quotation_id | fk → quotation | provenance |
+| negotiation_id | fk → negotiation | the winning negotiation |
+| supplier_id | fk → supplier | |
+| status | enum | `draft` → `issued` → `acknowledged` → `fulfilled` (or `cancelled`) |
+| currency | text | ISO 4217 |
+| subtotal | numeric | |
+| total_amount | numeric | |
+| lead_time_days | int | |
+| payment_terms | jsonb | |
+| expected_delivery_date | timestamptz \| null | issued_at + lead_time |
+| issued_at | timestamptz | |
+
+### PurchaseOrderLine
+
+Atomic line. Always references its originating `quotation_line_id` — full
+audit trail from PO line back to the original row in the supplier file.
+
+| Field | Type | Notes |
+|---|---|---|
+| id | uuid PK | |
+| po_id | fk → purchase_order | |
+| quotation_line_id | fk → quotation_line | **traceability** |
+| product_sku | fk → product | |
+| description | text | |
+| quantity | int | |
+| unit_price | numeric | |
+| line_total | numeric | |
+
+## What's NOT here (and why)
+
+- **No `QuotationDocument` separate from `Quotation`.** Single upload =
+  single quotation. If multi-sheet, parser merges with `source_ref.sheet`
+  tagging.
+- **No `RFQ` (Request for Quotation).** Implicit at upload time; not
+  modeled.
+- **No `Offer` standalone table.** It's a JSONB field on
+  `negotiation_message`. Current offer = latest message with `offer != null`.
+- **No `WinnerSelection` standalone table.** Embedded in `quotation`.
+  History as JSONB array.
+- **No `SupplierEvent` table.** Events are ephemeral via Inngest;
+  audit is captured as `negotiation_message` with `role: system`.
 
 ## Vocabulary contracts
 
-- A **quote** is *not* a `Quotation`. Avoid the word "quote" alone — say
-  "quotation" (the file) or "offer" (a structured proposal).
-- **Bid** is reserved for supplier-side offers within a negotiation.
-- **Counter** is a brand-side counter-offer.
-- **Curveball** is the canonical name for the mid-negotiation event that
-  changes constraints. Do not call it "twist" or "change request" in code.
+- A **Quotation** is the file; an **Offer** is a structured proposal
+  carried within a negotiation message; a **Recommendation** is the
+  brand agent's verdict; a **PurchaseOrder** is the commit.
+- **Bid** is reserved for supplier-side offers (rarely used in code —
+  prefer "offer").
+- **Counter** is a brand-side response to an offer.
+- **Curveball** is informal — in code we always use
+  `supplier.message` event.
+- **Brand agent** = the orchestrating intelligence. **Supplier agent**
+  = one of N counterparties. **Parser agent** = the file-parsing
+  subagent.
+
+## Naming conventions
+
+- Entities: PascalCase singular (`Quotation`, `PurchaseOrder`).
+- Tables: snake_case singular (`quotation`, `purchase_order_line`).
+- Enum values: snake_case (`agent_fuzzy_inferred`).
+- Files: kebab-case singular for schemas (`purchase-order.ts`).
+- Currency: ISO 4217 uppercase (`USD`).
+- Money: `numeric(14,4)` stored as string by Drizzle; converted at
+  the boundary.
+- Timestamps: `timestamp with time zone`, always UTC.
