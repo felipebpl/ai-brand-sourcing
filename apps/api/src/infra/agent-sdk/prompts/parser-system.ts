@@ -102,14 +102,66 @@ exists. Don't call lookup_catalog for every line — each call is a turn.
 
 **agent_fuzzy_inferred** — raw SKU is not verbatim catalog, but
 lookup_catalog returns a strong hit whose name/color fits the line's
-description (or you see an obvious typo: zero↔O, l↔I, missing dash).
-matchedSku = top hit, matchConfidence ~0.7–0.95,
+description (or you see an obvious typo per the rules below).
+matchedSku = top hit, matchConfidence ~0.65–0.95,
 matchReasoning = "MBOO2→MB002: zero-vs-O typo, name confirms".
 
 **agent_uncertain** — lookup returns weak candidates (none with strong
-description fit). matchedSku = null, matchConfidence = null,
+description fit) AND no typo pattern below cleanly applies.
+matchedSku = null, matchConfidence = null,
 matchMethod = "agent_uncertain", matchReasoning explains, and add an
 ambiguities entry { where: "line N", reason: "..." }.
+
+#### Common typo patterns — apply confidently
+
+Valden SKUs follow \`<3-letter-prefix><3-digit-number>-<3-letter-color>-<size>\`.
+Knowing this shape lets you resolve common supplier-side typos. When
+fuzzy candidates return with similarity in the 0.5–0.7 range, **do not
+default to uncertain**. First check these patterns:
+
+**Leading-zero truncation** (visible digit is the signal):
+- \`PHS8-SLT-S\` → PHS008-SLT-S. The visible "8" is the meaningful digit;
+  the missing leading zeros are padding. Choose PHS008, not PHS002.
+  Confidence ~0.85. matchReasoning: "leading-zero truncation —
+  visible digit '8' identifies PHS008".
+- \`OPP14-FNV-36-28\` → OPP014-FNV-36-28. Same pattern.
+- \`MB2-LGR-S\` → MB002-LGR-S. Same pattern.
+
+**Zero-vs-O confusion** (zeros typed as O or vice versa):
+- \`MBOO2-LGR-S\` → MB002-LGR-S. Zeros got typed as letter O.
+  Confidence ~0.90 if a candidate name corroborates.
+- \`0PP027-FNV-28-30\` → OPP027-FNV-28-30. First letter is O, typed as 0.
+  Confidence ~0.92 (very common).
+- \`AQ009-0BS-XS\` → AQ009-OBS-XS. Color code position. Confidence ~0.90
+  IF AQ009-OBS-XS exists in catalog; if not (as in q3 sample), then
+  flag — the prefix itself may be the wrong one.
+
+**Letter confusion** (visually similar lowercase/uppercase):
+- \`PWE016-lCB-L\` → PWE016-ICB-L. Lowercase "l" vs uppercase "I".
+  Confidence ~0.90.
+- \`MH01O-OBS-M\` → MH010-OBS-M. Trailing letter O vs zero.
+
+**Missing dashes**:
+- \`OB006ICBS\` → OB006-ICB-S. If the only ambiguity is missing
+  separators and the segments map cleanly to prefix-color-size,
+  confidence ~0.85.
+
+**Extra/wrong digit** (genuinely ambiguous, lean uncertain):
+- \`PWW106-OBS-L\` could be PWW006 (extra "1") OR PWW010-PWW1xx exists
+  with a "1" prefix. When only one candidate is within 0.5–0.7 and
+  removing/changing one digit yields it, **flag as uncertain** unless
+  description corroborates. The cost of guessing wrong is higher than
+  a quick human review.
+
+**Wrong prefix entirely** (genuinely uncertain):
+- If the prefix doesn't appear in any catalog candidate above ~0.5,
+  flag as uncertain. The supplier may have mistyped a category code
+  or sent a SKU outside Valden's catalog.
+
+The principle: **explicit signals beat statistical ties**. When the
+visible digit, letter, or position resolves the ambiguity, take it
+with confidence ~0.85–0.92. When the only signal is which fuzzy
+candidate happens to rank top, stay conservative.
 
 ### 5. Validate, then submit
 
