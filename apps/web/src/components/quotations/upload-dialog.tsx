@@ -62,11 +62,12 @@ export function UploadDialog({ open, onOpenChange }: Props) {
       <DialogContent className="sm:max-w-[520px]">
         <DialogHeader>
           <DialogTitle className="font-display text-[18px] tracking-tight">
-            New quotation
+            Simulate inbound quote
           </DialogTitle>
           <DialogDescription className="text-[13px]">
-            Drop a supplier quotation file. Add a sourcing intent and we'll
-            handle the negotiation.
+            In production this lands automatically when a supplier responds to
+            your RFQ. For the demo, drop the file they sent and add what
+            matters most for this sourcing decision.
           </DialogDescription>
         </DialogHeader>
 

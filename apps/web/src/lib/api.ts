@@ -1,4 +1,11 @@
-import type { QuotationStatus } from '@app/shared';
+import type {
+  NegotiationOffer,
+  NegotiationStatus,
+  QuotationStatus,
+  Recommendation,
+  SupplierComparisonRow,
+  UserInstructionIntent,
+} from '@app/shared';
 
 export const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL || 'http://localhost:3030';
@@ -45,9 +52,80 @@ export type QuotationSummary = {
 
 export type QuotationListResponse = { quotations: QuotationSummary[] };
 
+export type QuotationLineRow = {
+  id: string;
+  quotationId: string;
+  rawSku: string | null;
+  rawDescription: string | null;
+  minQty: number;
+  maxQty: number | null;
+  unitPrice: string;
+  currency: string;
+  matchedSku: string | null;
+  matchConfidence: string | null;
+  matchMethod: string | null;
+  matchReasoning: string | null;
+  sourceRef: unknown;
+  rawExtras: unknown;
+};
+
+export type NegotiationMessageRow = {
+  id: string;
+  negotiationId: string;
+  role: 'brand' | 'supplier' | 'system';
+  turnIndex: number;
+  content: string;
+  offer: NegotiationOffer | null;
+  metadata: Record<string, unknown> | null;
+  createdAt: string;
+};
+
+export type NegotiationRow = {
+  id: string;
+  quotationId: string;
+  supplierId: string;
+  status: NegotiationStatus;
+  finalUnitPriceAvg: string | null;
+  finalLeadTimeDays: number | null;
+  finalPaymentTerms: unknown;
+  roundsCount: number;
+  priceConcessionPct: number | null;
+  negotiationDurationSeconds: number | null;
+  winningDimensions: string[] | null;
+  createdAt: string;
+  updatedAt: string;
+  messages: NegotiationMessageRow[];
+};
+
+export type QuotationDetailResponse = {
+  quotation: {
+    id: string;
+    brandId: string;
+    sourceSupplierId: string;
+    uploadedFilename: string;
+    storageUri: string;
+    userInstruction: string | null;
+    userInstructionIntent: UserInstructionIntent | null;
+    parsedMetadata: Record<string, unknown> | null;
+    status: QuotationStatus;
+    recommendedNegotiationId: string | null;
+    recommendationReasoning: string | null;
+    recommendationComparison: SupplierComparisonRow[] | null;
+    recommendedAt: string | null;
+    recommendationHistory: Array<
+      Recommendation & { supersededReason: string | null }
+    >;
+    createdAt: string;
+    updatedAt: string;
+  };
+  lines: QuotationLineRow[];
+  negotiations: NegotiationRow[];
+};
+
 export const api = {
   listQuotations: () => request<QuotationListResponse>('/quotations'),
-  getQuotation: (id: string) => request<unknown>(`/quotations/${id}`),
+  getQuotation: (id: string) =>
+    request<QuotationDetailResponse>(`/quotations/${id}`),
   createQuotation: (form: FormData) =>
     request<{ quotationId: string; status: QuotationStatus }>('/quotations', {
       method: 'POST',
