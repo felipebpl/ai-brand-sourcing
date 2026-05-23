@@ -44,9 +44,20 @@ export interface BrandAgentPort {
 export interface BrandAgentNegotiateInput {
   quotationId: string;
   brand: BrandProfile;
+  userInstruction: string | null;
   intent: UserInstructionIntent;
   suppliers: SupplierProfile[];
   baseline: NegotiationOffer;
+  /**
+   * The bundle of items the brand is negotiating across all suppliers.
+   * Each supplier gets the same list (information asymmetry is preserved
+   * by *what was asked*, not by hiding the goods).
+   */
+  items: ReadonlyArray<{
+    productSku: string;
+    description: string | null;
+    quantity: number;
+  }>;
 }
 
 export interface BrandAgentReactInput {

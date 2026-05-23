@@ -13,6 +13,7 @@ import { ClaudeBrandAgentAdapter } from '../infra/agent-sdk/adapters/brand-agent
 import { ClaudeParserAdapter } from '../infra/agent-sdk/adapters/parser.claude';
 import { ClaudeSupplierAgentAdapter } from '../infra/agent-sdk/adapters/supplier-agent.claude';
 import { parseAndPersist } from '../quotations/pipeline';
+import { runNegotiation } from '../negotiations/pipeline';
 
 /**
  * Agent SDK smoke harness.
@@ -123,6 +124,12 @@ if (mode === 'negotiate-round') {
   process.exit(0);
 }
 
+if (mode === 'negotiate') {
+  const quotationIdArg = process.argv[3];
+  await runEndToEndNegotiation(quotationIdArg);
+  process.exit(0);
+}
+
 const adapter = new ClaudeBrandAgentAdapter({ db, eventBus });
 
 if (mode === 'parser-ping') {
@@ -139,6 +146,48 @@ log('Done.');
 process.exit(0);
 
 // ---------------------------------------------------------------------------
+
+async function runEndToEndNegotiation(
+  explicitQuotationId: string | undefined,
+): Promise<void> {
+  let quotationId = explicitQuotationId;
+  if (!quotationId) {
+    const recent = await db
+      .select({ id: quotation.id })
+      .from(quotation)
+      .where(eq(quotation.status, 'parsed'))
+      .orderBy(desc(quotation.updatedAt))
+      .limit(1);
+    if (!recent[0]) {
+      console.error(
+        'No parsed quotation available. Run `bun agent:smoke parse-persist assets/quotation_2.xlsx` first.',
+      );
+      process.exit(1);
+    }
+    quotationId = recent[0].id;
+  }
+
+  log(`Running brand-agent end-to-end negotiation on ${quotationId}`);
+  const outcome = await runNegotiation({
+    db,
+    eventBus,
+    brand,
+    quotationId,
+    force: false,
+  });
+  log('Outcome', outcome);
+
+  if (outcome.kind === 'recommended') {
+    log('Winner recommendation', {
+      supplierId: outcome.recommendation.supplierId,
+      negotiationId: outcome.recommendation.negotiationId,
+      decidedAt: outcome.recommendation.decidedAt,
+    });
+    log('Reasoning', outcome.recommendation.reasoning);
+    log('Comparison matrix', outcome.recommendation.comparison);
+    log(`Duration: ${(outcome.durationMs / 1000).toFixed(1)}s`);
+  }
+}
 
 async function runNegotiateRound(supplierId: string): Promise<void> {
   // Find the most recent parsed quotation to negotiate over.

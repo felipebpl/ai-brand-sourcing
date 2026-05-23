@@ -1,6 +1,7 @@
 import {
   query,
   type AgentDefinition,
+  type McpSdkServerConfigWithInstance,
   type Options,
   type SDKResultSuccess,
 } from '@anthropic-ai/claude-agent-sdk';
@@ -11,6 +12,7 @@ import type {
   BrandAgentReactInput,
   EventBusPort,
   Recommendation,
+  SupplierAgentPort,
 } from '../../../domain';
 import type { DB } from '../../../db';
 import { modelFor, TaskAssignment } from '../model-router';
@@ -21,6 +23,12 @@ import {
   PARSER_AGENT_PLACEHOLDER_DESCRIPTION,
   PARSER_AGENT_PLACEHOLDER_PROMPT,
 } from '../prompts/parser-agent';
+import {
+  BRAND_AGENT_SYSTEM_PROMPT,
+  renderBrandAgentTaskPrompt,
+} from '../prompts/brand-system';
+import { makeBrandMcpServer } from '../tools/brand-server';
+import type { SubmitRecommendationSink } from '../tools/submit-recommendation';
 
 /**
  * Brand agent adapter (Claude Agent SDK).
@@ -43,19 +51,28 @@ import {
  */
 export class ClaudeBrandAgentAdapter implements BrandAgentPort {
   private readonly sessionStore: PgSessionStore;
+  private readonly db: DB;
+  private readonly eventBus: EventBusPort;
+  private readonly softBudgetUsd: number;
+  /** supplier-id → adapter; required for `negotiate()`, unused for smoke methods. */
+  private readonly supplierAdapters: ReadonlyMap<string, SupplierAgentPort>;
+  /** supplier-id → negotiation row id; required for `negotiate()`. */
+  private readonly negotiationIdBySupplier: ReadonlyMap<string, string>;
 
   constructor(opts: {
     db: DB;
     eventBus: EventBusPort;
     softBudgetUsd?: number;
+    supplierAdapters?: ReadonlyMap<string, SupplierAgentPort>;
+    negotiationIdBySupplier?: ReadonlyMap<string, string>;
   }) {
+    this.db = opts.db;
     this.sessionStore = new PgSessionStore(opts.db);
     this.eventBus = opts.eventBus;
     this.softBudgetUsd = opts.softBudgetUsd ?? 1.5;
+    this.supplierAdapters = opts.supplierAdapters ?? new Map();
+    this.negotiationIdBySupplier = opts.negotiationIdBySupplier ?? new Map();
   }
-
-  private readonly eventBus: EventBusPort;
-  private readonly softBudgetUsd: number;
 
   /**
    * Smoke-test method: boots a minimal `query()` to validate the SDK is
@@ -172,17 +189,108 @@ export class ClaudeBrandAgentAdapter implements BrandAgentPort {
     };
   }
 
-  async negotiate(_input: BrandAgentNegotiateInput): Promise<Recommendation> {
-    throw new Error(
-      'ClaudeBrandAgentAdapter.negotiate not implemented yet (Step 5)',
-    );
+  /**
+   * Run the full negotiation: opens N supplier conversations (already
+   * persisted as negotiation rows by the caller), drives a multi-round
+   * agentic loop via the brand MCP tools, and returns the structured
+   * Recommendation captured from `submit_recommendation`.
+   *
+   * Caller invariants:
+   *  - `supplierAdapters` and `negotiationIdBySupplier` must be set on
+   *    this adapter (via the constructor) for every supplier in `input.suppliers`.
+   *  - Each negotiation row must already exist in the DB (created by
+   *    `runNegotiation` pipeline before calling this).
+   */
+  async negotiate(input: BrandAgentNegotiateInput): Promise<Recommendation> {
+    const supplierContextMap = new Map<
+      string,
+      {
+        adapter: SupplierAgentPort;
+        negotiationId: string;
+        quotedItems: BrandAgentNegotiateInput['items'];
+      }
+    >();
+    for (const profile of input.suppliers) {
+      const adapter = this.supplierAdapters.get(profile.id);
+      const negotiationId = this.negotiationIdBySupplier.get(profile.id);
+      if (!adapter || !negotiationId) {
+        throw new Error(
+          `Brand adapter missing setup for ${profile.id}: ${
+            !adapter ? 'no supplier adapter' : ''
+          } ${!negotiationId ? 'no negotiation row' : ''}`,
+        );
+      }
+      supplierContextMap.set(profile.id, {
+        adapter,
+        negotiationId,
+        quotedItems: input.items,
+      });
+    }
+
+    let captured: Recommendation | undefined;
+    const sink: SubmitRecommendationSink = {
+      accept: async (rec) => {
+        captured = rec;
+      },
+    };
+
+    const mcpServer = makeBrandMcpServer({
+      db: this.db,
+      suppliers: supplierContextMap,
+      negotiationIdBySupplier: this.negotiationIdBySupplier,
+      recommendationSink: sink,
+    });
+
+    const userPrompt = renderBrandAgentTaskPrompt({
+      brand: input.brand,
+      userInstruction: input.userInstruction,
+      intent: input.intent,
+      baseline: input.baseline,
+      suppliers: input.suppliers,
+      items: input.items,
+      negotiationIdBySupplier: this.negotiationIdBySupplier,
+    });
+
+    const options = this.makeBaseOptions({
+      quotationId: input.quotationId,
+      systemPrompt: BRAND_AGENT_SYSTEM_PROMPT,
+      taskTier: TaskAssignment.brandAgent,
+      maxTurns: 25,
+      maxBudgetUsd: 2.0,
+      mcpServers: { brand: mcpServer },
+      tools: [],
+      allowedTools: [
+        'mcp__brand__ask_suppliers',
+        'mcp__brand__walk_away_from',
+        'mcp__brand__submit_recommendation',
+      ],
+      disallowedTools: ['Bash', 'Read', 'Write', 'Edit', 'WebFetch', 'WebSearch', 'Agent', 'Glob', 'Grep'],
+    });
+
+    let lastResult: SDKResultSuccess | undefined;
+    for await (const message of query({ prompt: userPrompt, options })) {
+      if (message.type === 'result' && message.subtype === 'success') {
+        lastResult = message;
+      }
+    }
+
+    if (!captured) {
+      throw new Error(
+        `Brand agent finished without calling submit_recommendation. ` +
+          `Last result: ${lastResult?.subtype ?? 'unknown'}; cost: $${
+            lastResult?.total_cost_usd?.toFixed(4) ?? '?'
+          }`,
+      );
+    }
+
+    return captured;
   }
 
   async reactToSupplierMessage(
     _input: BrandAgentReactInput,
   ): Promise<Recommendation> {
     throw new Error(
-      'ClaudeBrandAgentAdapter.reactToSupplierMessage not implemented yet (Step 5)',
+      'ClaudeBrandAgentAdapter.reactToSupplierMessage not implemented yet (Step 6 — curveball wiring)',
     );
   }
 
@@ -190,12 +298,15 @@ export class ClaudeBrandAgentAdapter implements BrandAgentPort {
     quotationId: string;
     systemPrompt: string;
     taskTier: (typeof TaskAssignment)[keyof typeof TaskAssignment];
-    outputSchema: Record<string, unknown>;
+    /** Omit when the agent's terminal action is a tool (not structured output). */
+    outputSchema?: Record<string, unknown>;
     maxTurns: number;
     maxBudgetUsd: number;
     agents?: Record<string, AgentDefinition>;
     tools?: string[];
     allowedTools?: string[];
+    disallowedTools?: string[];
+    mcpServers?: Record<string, McpSdkServerConfigWithInstance>;
   }): Options {
     const traceHooks = makeTraceHooks({
       quotationId: args.quotationId,
@@ -210,7 +321,7 @@ export class ClaudeBrandAgentAdapter implements BrandAgentPort {
       },
     });
 
-    return {
+    const base: Record<string, unknown> = {
       model: modelFor(args.taskTier),
       systemPrompt: { type: 'preset', preset: 'claude_code', append: args.systemPrompt },
       settingSources: [],
@@ -218,16 +329,23 @@ export class ClaudeBrandAgentAdapter implements BrandAgentPort {
       tools: args.tools ?? [],
       allowedTools: args.allowedTools ?? [],
       agents: args.agents,
+      mcpServers: args.mcpServers,
       maxTurns: args.maxTurns,
       maxBudgetUsd: args.maxBudgetUsd,
       sessionStore: this.sessionStore,
-      outputFormat: { type: 'json_schema', schema: args.outputSchema },
       hooks: {
         PreToolUse: [{ hooks: [traceHooks.PreToolUse] }],
         PostToolUse: [{ hooks: [traceHooks.PostToolUse] }],
         Stop: [{ hooks: [costGuard] }],
       },
-    } as Options;
+    };
+    if (args.disallowedTools) {
+      base.disallowedTools = args.disallowedTools;
+    }
+    if (args.outputSchema) {
+      base.outputFormat = { type: 'json_schema', schema: args.outputSchema };
+    }
+    return base as Options;
   }
 }
 
