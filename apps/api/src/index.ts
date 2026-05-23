@@ -7,6 +7,8 @@ import { functions } from './inngest/functions';
 import { inngest } from './inngest/client';
 import { env } from './lib/env';
 import { healthRouter } from './routes/health';
+import { quotationsRouter } from './routes/quotations';
+import { purchaseOrdersRouter } from './routes/purchase-orders';
 
 const app = new OpenAPIHono();
 
@@ -20,6 +22,8 @@ app.use(
 );
 
 app.route('/', healthRouter);
+app.route('/', quotationsRouter);
+app.route('/', purchaseOrdersRouter);
 
 const inngestHandler = serve({ client: inngest, functions: [...functions] });
 app.on(['GET', 'PUT', 'POST'], '/api/inngest', inngestHandler);
