@@ -1,12 +1,5 @@
 import { Link, useRouterState } from '@tanstack/react-router';
-import {
-  Building2,
-  Inbox,
-  Package,
-  ScrollText,
-  Settings,
-  Sun,
-} from 'lucide-react';
+import { Package, ScrollText, Settings, Sun } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { AmberLogo } from '@/components/brand/amber-logo';
 import { cn } from '@/lib/utils';
@@ -19,18 +12,12 @@ type NavItem = {
 };
 
 const NAV: NavItem[] = [
-  { to: '/inbox', label: 'Inbox', icon: <Inbox className="size-4" /> },
   {
     to: '/quotations',
     label: 'RFQs',
     icon: <ScrollText className="size-4" />,
   },
   { to: '/orders', label: 'Orders', icon: <Package className="size-4" /> },
-  {
-    to: '/suppliers',
-    label: 'Suppliers',
-    icon: <Building2 className="size-4" />,
-  },
 ];
 
 export function Sidebar() {

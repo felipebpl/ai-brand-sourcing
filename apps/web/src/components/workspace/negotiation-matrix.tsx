@@ -345,7 +345,8 @@ function SupplierColumnHeader({
           isTerminal={isTerminal}
         />
         <span className="text-[10px] text-muted-foreground">
-          R{negotiation.roundsCount} · {formatRelative(negotiation.updatedAt)}
+          R{effectiveRounds(negotiation)} ·{' '}
+          {formatRelative(negotiation.updatedAt)}
         </span>
       </div>
 
@@ -522,6 +523,16 @@ const TURN_INTENT_LABEL: Record<string, string> = {
   walk_away: 'Walked away',
   request_clarification: 'Clarification',
 };
+
+export function effectiveRounds(negotiation: NegotiationRow): number {
+  if (negotiation.roundsCount > 0) return negotiation.roundsCount;
+  if (negotiation.messages.length === 0) return 0;
+  const maxTurn = negotiation.messages.reduce(
+    (m, msg) => Math.max(m, msg.turnIndex),
+    -1,
+  );
+  return Math.max(0, Math.floor(maxTurn / 2) + 1);
+}
 
 function StatusChip({
   status,

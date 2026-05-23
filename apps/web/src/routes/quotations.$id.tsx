@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
-import { createFileRoute } from '@tanstack/react-router';
-import { CheckCircle2, Sparkles } from 'lucide-react';
+import { createFileRoute, Link } from '@tanstack/react-router';
+import { CheckCircle2 } from 'lucide-react';
+import { ConvertBar } from '@/components/workspace/convert-bar';
 import { LiveDialogue } from '@/components/workspace/live-dialogue';
 import { NegotiationMatrix } from '@/components/workspace/negotiation-matrix';
 import { ParsingActivity } from '@/components/workspace/parsing-activity';
@@ -120,30 +121,9 @@ function RealWorkspace({ id }: { id: string }) {
       </div>
 
       {quotation.status === 'recommended' ? (
-        <ConvertBar quotationId={quotation.id} />
+        <ConvertBar q={quotation} lines={lines} />
       ) : null}
       {quotation.status === 'committed' ? <CommittedBar /> : null}
-    </div>
-  );
-}
-
-function ConvertBar({ quotationId }: { quotationId: string }) {
-  return (
-    <div className="border-t border-border bg-background px-8 py-3 shadow-[0_-8px_24px_-12px_rgba(0,0,0,0.08)]">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2 text-[12.5px] text-muted-foreground">
-          <Sparkles className="size-3.5 text-primary" />
-          The winning negotiation is ready to commit.
-        </div>
-        <Button
-          size="default"
-          className="bg-foreground text-background hover:bg-foreground/90"
-          data-quotation-id={quotationId}
-        >
-          <CheckCircle2 className="size-3.5" />
-          Create Draft Order
-        </Button>
-      </div>
     </div>
   );
 }
@@ -156,9 +136,11 @@ function CommittedBar() {
           <CheckCircle2 className="size-3.5 text-success" />
           Purchase Order issued.
         </div>
-        <Button size="sm" variant="outline">
-          Open PO
-        </Button>
+        <Link to="/orders">
+          <Button size="sm" variant="outline">
+            Open Orders
+          </Button>
+        </Link>
       </div>
     </div>
   );

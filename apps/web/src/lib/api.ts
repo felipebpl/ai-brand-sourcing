@@ -1,6 +1,8 @@
 import type {
   NegotiationOffer,
   NegotiationStatus,
+  PaymentTerms,
+  PurchaseOrderStatus,
   QuotationStatus,
   Recommendation,
   SupplierComparisonRow,
@@ -122,6 +124,45 @@ export type QuotationDetailResponse = {
   negotiations: NegotiationRow[];
 };
 
+export type PurchaseOrderSummary = {
+  id: string;
+  poNumber: string;
+  brandId: string;
+  supplierId: string;
+  quotationId: string;
+  negotiationId: string;
+  status: PurchaseOrderStatus;
+  currency: string;
+  subtotal: string;
+  totalAmount: string;
+  leadTimeDays: number;
+  paymentTerms: PaymentTerms;
+  expectedDeliveryDate: string | null;
+  issuedAt: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type PurchaseOrderLineRow = {
+  id: string;
+  purchaseOrderId: string;
+  quotationLineId: string;
+  productSku: string;
+  description: string;
+  quantity: number;
+  unitPrice: string;
+  lineTotal: string;
+};
+
+export type PurchaseOrderDetailResponse = {
+  purchaseOrder: PurchaseOrderSummary;
+  lines: PurchaseOrderLineRow[];
+};
+
+export type PurchaseOrderListResponse = {
+  purchaseOrders: PurchaseOrderSummary[];
+};
+
 export const api = {
   listQuotations: () => request<QuotationListResponse>('/quotations'),
   getQuotation: (id: string) =>
@@ -131,10 +172,12 @@ export const api = {
       method: 'POST',
       body: form,
     }),
-  listPurchaseOrders: () => request<unknown>('/purchase-orders'),
-  getPurchaseOrder: (id: string) => request<unknown>(`/purchase-orders/${id}`),
+  listPurchaseOrders: () =>
+    request<PurchaseOrderListResponse>('/purchase-orders'),
+  getPurchaseOrder: (id: string) =>
+    request<PurchaseOrderDetailResponse>(`/purchase-orders/${id}`),
   createPurchaseOrder: (quotationId: string) =>
-    request<{ purchaseOrderId?: string; status: string }>('/purchase-orders', {
+    request<{ accepted: true; quotationId: string }>('/purchase-orders', {
       method: 'POST',
       body: JSON.stringify({ quotationId }),
     }),

@@ -5,6 +5,7 @@ import type {
   NegotiationRow,
   QuotationDetailResponse,
 } from '@/lib/api';
+import { effectiveRounds } from '@/components/workspace/negotiation-matrix';
 import { money, shortenPaymentTerms } from '@/lib/format';
 import type { AgentEvent } from '@/lib/sse';
 import { accentClasses, supplierMeta } from '@/lib/suppliers';
@@ -53,7 +54,7 @@ export function LiveDialogue({ quotation, negotiations, events }: Props) {
     el.scrollTop = el.scrollHeight;
   }, [lastItemId]);
 
-  const maxRound = Math.max(0, ...negotiations.map((n) => n.roundsCount));
+  const maxRound = Math.max(0, ...negotiations.map((n) => effectiveRounds(n)));
   const isLive =
     quotation.status === 'negotiating' || quotation.status === 'parsed';
   const title = isLive ? 'Live negotiation' : 'Negotiation history';
