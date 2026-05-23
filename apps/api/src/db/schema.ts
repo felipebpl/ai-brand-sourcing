@@ -1,6 +1,8 @@
 import { relations, sql } from 'drizzle-orm';
 import {
+  bigserial,
   doublePrecision,
+  index,
   integer,
   jsonb,
   numeric,
@@ -72,17 +74,34 @@ export const purchaseOrderStatus = pgEnum('purchase_order_status', [
  *
  * `attributes` JSONB carries future-proof enrichment (material, weight,
  * compliance tags, etc.) without forcing schema migrations.
+ *
+ * Trigram GIN indexes on `sku` and `name` power the parser agent's
+ * `lookup_catalog` MCP tool — requires the `pg_trgm` extension which the
+ * seed script ensures.
  */
-export const product = pgTable('product', {
-  sku: text('sku').primaryKey(),
-  brandId: text('brand_id').notNull().default('valden'),
-  name: text('name').notNull(),
-  color: text('color'),
-  attributes: jsonb('attributes'),
-  createdAt: timestamp('created_at', { withTimezone: true })
-    .defaultNow()
-    .notNull(),
-});
+export const product = pgTable(
+  'product',
+  {
+    sku: text('sku').primaryKey(),
+    brandId: text('brand_id').notNull().default('valden'),
+    name: text('name').notNull(),
+    color: text('color'),
+    attributes: jsonb('attributes'),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    skuTrgmIdx: index('product_sku_trgm_idx').using(
+      'gin',
+      sql`${table.sku} gin_trgm_ops`,
+    ),
+    nameTrgmIdx: index('product_name_trgm_idx').using(
+      'gin',
+      sql`${table.name} gin_trgm_ops`,
+    ),
+  }),
+);
 
 /**
  * Suppliers — both the one who uploaded the original quotation and the
@@ -401,5 +420,45 @@ export const purchaseOrderLineRelations = relations(
       fields: [purchaseOrderLine.quotationLineId],
       references: [quotationLine.id],
     }),
+  }),
+);
+
+// -------- Claude Agent SDK session storage ---------------------------------
+
+/**
+ * Claude Agent SDK SessionStore adapter — receives a mirror of every
+ * transcript line emitted by `query()` runs so that sessions can be
+ * resumed across worker hosts (Inngest cross-host execution).
+ *
+ * The SDK passes opaque JSON entries; `uuid` is the idempotency key for
+ * de-duplicating retries / replays. Entries without `uuid` (titles, tags,
+ * mode markers) are stored as-appended.
+ *
+ * See `apps/api/src/infra/agent-sdk/session-store.pg.ts` for the
+ * implementation that consumes this table.
+ */
+export const claudeSessionEntry = pgTable(
+  'claude_session_entry',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    projectKey: text('project_key').notNull(),
+    sessionId: text('session_id').notNull(),
+    subpath: text('subpath'),
+    entryUuid: text('entry_uuid'),
+    payload: jsonb('payload').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    sessionOrderIdx: index('claude_session_entry_session_order_idx').on(
+      table.projectKey,
+      table.sessionId,
+      table.subpath,
+      table.id,
+    ),
+    uuidDedupIdx: uniqueIndex('claude_session_entry_uuid_dedup_idx')
+      .on(table.projectKey, table.sessionId, table.subpath, table.entryUuid)
+      .where(sql`entry_uuid IS NOT NULL`),
   }),
 );

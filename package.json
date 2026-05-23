@@ -19,6 +19,7 @@
     "db:push": "bun --filter @app/api db:push",
     "db:seed": "bun --filter @app/api db:seed",
     "db:studio": "bun --filter @app/api db:studio",
+    "agent:smoke": "bun --filter @app/api agent:smoke",
     "typecheck": "bun --filter '*' typecheck",
     "lint": "bun --filter '*' lint",
     "format": "bunx prettier --write \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml}\"",

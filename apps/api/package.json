@@ -12,6 +12,7 @@
     "db:migrate": "bun --env-file=../../.env x drizzle-kit migrate",
     "db:studio": "bun --env-file=../../.env x drizzle-kit studio",
     "db:seed": "DB_LOG=silent bun --env-file=../../.env src/db/seed.ts",
+    "agent:smoke": "DB_LOG=silent bun --env-file=../../.env src/scripts/agent-smoke.ts",
     "test": "bun --env-file=../../.env test"
   },
   "dependencies": {
