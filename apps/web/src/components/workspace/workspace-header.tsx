@@ -45,7 +45,7 @@ export function WorkspaceHeader({ q, roundsInFlight }: Props) {
             </span>
             <span className="text-muted-foreground/50">·</span>
             <span className="font-mono text-[11.5px]">
-              {q.uploadedFilename}
+              {q.uploadedFilename ?? '—'}
             </span>
             <span className="text-muted-foreground/50">·</span>
             <span>{formatRelative(q.createdAt)}</span>

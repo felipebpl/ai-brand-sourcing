@@ -5,6 +5,7 @@ type UiStatus = QuotationStatus | 'awaiting';
 
 const COPY: Record<UiStatus, string> = {
   awaiting: 'Awaiting reply',
+  awaiting_quote: 'Awaiting reply',
   uploaded: 'Uploaded',
   parsing: 'Parsing',
   parsed: 'Parsed',
@@ -17,6 +18,7 @@ const COPY: Record<UiStatus, string> = {
 
 const DOT: Record<UiStatus, string> = {
   awaiting: 'bg-attention',
+  awaiting_quote: 'bg-attention',
   uploaded: 'bg-muted-foreground/60',
   parsing: 'bg-attention animate-pulse',
   parsed: 'bg-muted-foreground/60',

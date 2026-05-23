@@ -1,6 +1,5 @@
 import { createContext, useContext, type ReactNode } from 'react';
 import { useRouterState } from '@tanstack/react-router';
-import { isSeedRfqId } from '@/lib/seed-rfq';
 import { useNegotiationStream, type AgentEvent } from '@/lib/sse';
 
 type StreamContextValue = {
@@ -18,9 +17,7 @@ const StreamContext = createContext<StreamContextValue>({
 export function NegotiationStreamProvider({ children }: { children: ReactNode }) {
   const { location } = useRouterState();
   const match = location.pathname.match(/^\/quotations\/([^/]+)/);
-  const candidate = match?.[1];
-  const quotationId =
-    candidate && !isSeedRfqId(candidate) ? candidate : undefined;
+  const quotationId = match?.[1];
 
   const { events, lastEvent } = useNegotiationStream(quotationId);
 

@@ -1,14 +1,11 @@
-import { useQuery } from '@tanstack/react-query';
-import { createFileRoute, Link } from '@tanstack/react-router';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
 import { Filter, Plus, Search, SlidersHorizontal } from 'lucide-react';
-import { useState } from 'react';
 import { StatusPill } from '@/components/quotations/status-pill';
-import { UploadDialog } from '@/components/quotations/upload-dialog';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { api, type QuotationSummary } from '@/lib/api';
 import { rfqNumber } from '@/lib/rfq';
-import { SEED_RFQ } from '@/lib/seed-rfq';
 import { supplierMeta } from '@/lib/suppliers';
 import { formatRelative } from '@/lib/time';
 
@@ -17,7 +14,8 @@ export const Route = createFileRoute('/quotations/')({
 });
 
 function RFQsIndex() {
-  const [uploadOpen, setUploadOpen] = useState(false);
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
     queryKey: ['quotations'],
@@ -31,6 +29,14 @@ function RFQsIndex() {
     },
   });
 
+  const createMutation = useMutation({
+    mutationFn: api.createRfq,
+    onSuccess: async (res) => {
+      await queryClient.invalidateQueries({ queryKey: ['quotations'] });
+      navigate({ to: '/quotations/$id', params: { id: res.quotationId } });
+    },
+  });
+
   const rows = data?.quotations ?? [];
 
   return (
@@ -41,14 +47,18 @@ function RFQsIndex() {
             RFQs
           </h1>
           <p className="mt-1 text-[13px] text-muted-foreground">
-            Each RFQ is a sourcing event triggered by a supplier quote. We
-            negotiate against all three suppliers in parallel and recommend a
-            winner.
+            Each RFQ is a sourcing event. Create one, ingest the supplier's
+            quote, and we'll negotiate against all three suppliers in
+            parallel.
           </p>
         </div>
-        <Button size="sm" onClick={() => setUploadOpen(true)}>
+        <Button
+          size="sm"
+          onClick={() => createMutation.mutate()}
+          disabled={createMutation.isPending}
+        >
           <Plus className="size-3.5" />
-          New RFQ
+          {createMutation.isPending ? 'Creating…' : 'New RFQ'}
         </Button>
       </div>
 
@@ -89,7 +99,12 @@ function RFQsIndex() {
             message={(error as Error)?.message}
           />
         ) : null}
-        {!isLoading && !isError ? <RfqTable rows={rows} /> : null}
+        {!isLoading && !isError && rows.length === 0 ? (
+          <EmptyState onCreate={() => createMutation.mutate()} />
+        ) : null}
+        {!isLoading && !isError && rows.length > 0 ? (
+          <RfqTable rows={rows} />
+        ) : null}
       </div>
 
       {isFetching && rows.length > 0 ? (
@@ -98,8 +113,6 @@ function RFQsIndex() {
           <span className="ml-1 inline-block size-1 animate-pulse rounded-full bg-primary align-middle" />
         </div>
       ) : null}
-
-      <UploadDialog open={uploadOpen} onOpenChange={setUploadOpen} />
     </div>
   );
 }
@@ -117,9 +130,10 @@ function RfqTable({ rows }: { rows: QuotationSummary[] }) {
         </tr>
       </thead>
       <tbody>
-        {rows.length === 0 ? <SeededRow /> : null}
         {rows.map((q) => {
           const source = supplierMeta(q.sourceSupplierId);
+          const fileLabel =
+            q.uploadedFilename ?? 'Awaiting supplier quote';
           return (
             <tr
               key={q.id}
@@ -134,8 +148,14 @@ function RfqTable({ rows }: { rows: QuotationSummary[] }) {
                   <span className="font-mono text-[12.5px] font-medium text-foreground">
                     {rfqNumber(q)}
                   </span>
-                  <span className="truncate text-[11.5px] text-muted-foreground">
-                    {q.uploadedFilename}
+                  <span
+                    className={
+                      q.uploadedFilename
+                        ? 'truncate text-[11.5px] text-muted-foreground'
+                        : 'truncate text-[11.5px] italic text-muted-foreground/80'
+                    }
+                  >
+                    {fileLabel}
                   </span>
                 </Link>
               </td>
@@ -159,35 +179,26 @@ function RfqTable({ rows }: { rows: QuotationSummary[] }) {
   );
 }
 
-function SeededRow() {
-  const source = supplierMeta(SEED_RFQ.sourceSupplierId);
+function EmptyState({ onCreate }: { onCreate: () => void }) {
   return (
-    <tr className="group cursor-pointer border-b border-border/70 transition-colors hover:bg-muted/50">
-      <td className="px-8 py-3">
-        <Link
-          to="/quotations/$id"
-          params={{ id: SEED_RFQ.id }}
-          className="flex flex-col gap-0.5"
-        >
-          <span className="font-mono text-[12.5px] font-medium text-foreground">
-            {SEED_RFQ.number}
-          </span>
-          <span className="truncate text-[11.5px] text-muted-foreground">
-            {SEED_RFQ.productsTarget} products · {SEED_RFQ.unitsTarget.toLocaleString()} units
-          </span>
-        </Link>
-      </td>
-      <td className="py-3 text-foreground">{source.label}</td>
-      <td className="py-3">
-        <StatusPill status="awaiting" />
-      </td>
-      <td className="max-w-[360px] truncate py-3 text-muted-foreground">
-        <span className="italic">Awaiting the supplier to send their quote</span>
-      </td>
-      <td className="py-3 pr-8 text-right tabular text-muted-foreground">
-        Due Jun 15
-      </td>
-    </tr>
+    <div className="flex h-full items-center justify-center px-8 py-16">
+      <div className="max-w-sm text-center">
+        <div className="mx-auto flex size-12 items-center justify-center rounded-full bg-accent text-primary">
+          <Plus className="size-5" />
+        </div>
+        <h3 className="mt-4 font-display text-[18px] font-semibold tracking-tight text-foreground">
+          No RFQs yet
+        </h3>
+        <p className="mt-1.5 text-[13px] text-muted-foreground">
+          Create an RFQ to start a sourcing event. You'll ingest the supplier
+          quote from inside it.
+        </p>
+        <Button className="mt-5" size="sm" onClick={onCreate}>
+          <Plus className="size-3.5" />
+          New RFQ
+        </Button>
+      </div>
+    </div>
   );
 }
 
@@ -201,7 +212,7 @@ function ErrorState({
   return (
     <div className="flex h-full items-center justify-center px-8 py-16">
       <div className="max-w-md text-center">
-        <h3 className="font-display text-[16px] font-semibold tracking-tight">
+        <h3 className="font-display text-[16px] font-semibold tracking-tight text-foreground">
           Can't reach the API
         </h3>
         <p className="mt-1.5 text-[13px] text-muted-foreground">

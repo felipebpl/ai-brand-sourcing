@@ -23,9 +23,10 @@ import { cn } from '@/lib/utils';
 type Props = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  quotationId?: string;
 };
 
-export function UploadDialog({ open, onOpenChange }: Props) {
+export function UploadDialog({ open, onOpenChange, quotationId }: Props) {
   const [file, setFile] = useState<File | null>(null);
   const [instruction, setInstruction] = useState('');
   const [dragOver, setDragOver] = useState(false);
@@ -45,10 +46,16 @@ export function UploadDialog({ open, onOpenChange }: Props) {
       const form = new FormData();
       form.append('file', file);
       if (instruction.trim()) form.append('userInstruction', instruction.trim());
+      if (quotationId) return api.attachQuoteToRfq(quotationId, form);
       return api.createQuotation(form);
     },
     onSuccess: async (data) => {
       await queryClient.invalidateQueries({ queryKey: ['quotations'] });
+      if (quotationId) {
+        await queryClient.invalidateQueries({
+          queryKey: ['quotation', quotationId],
+        });
+      }
       onOpenChange(false);
       reset();
       navigate({ to: '/quotations/$id', params: { id: data.quotationId } });

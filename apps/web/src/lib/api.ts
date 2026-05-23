@@ -44,7 +44,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export type QuotationSummary = {
   id: string;
   status: QuotationStatus;
-  uploadedFilename: string;
+  uploadedFilename: string | null;
   userInstruction: string | null;
   sourceSupplierId: string;
   recommendedNegotiationId: string | null;
@@ -104,8 +104,8 @@ export type QuotationDetailResponse = {
     id: string;
     brandId: string;
     sourceSupplierId: string;
-    uploadedFilename: string;
-    storageUri: string;
+    uploadedFilename: string | null;
+    storageUri: string | null;
     userInstruction: string | null;
     userInstructionIntent: UserInstructionIntent | null;
     parsedMetadata: Record<string, unknown> | null;
@@ -172,6 +172,16 @@ export const api = {
       method: 'POST',
       body: form,
     }),
+  createRfq: () =>
+    request<{ quotationId: string; status: QuotationStatus }>('/rfqs', {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }),
+  attachQuoteToRfq: (id: string, form: FormData) =>
+    request<{ quotationId: string; status: QuotationStatus }>(
+      `/quotations/${id}/quote`,
+      { method: 'POST', body: form },
+    ),
   listPurchaseOrders: () =>
     request<PurchaseOrderListResponse>('/purchase-orders'),
   getPurchaseOrder: (id: string) =>

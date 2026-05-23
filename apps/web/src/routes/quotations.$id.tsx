@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { createFileRoute, Link } from '@tanstack/react-router';
 import { CheckCircle2 } from 'lucide-react';
+import { AwaitingQuoteWorkspace } from '@/components/workspace/awaiting-quote-workspace';
 import { ConvertBar } from '@/components/workspace/convert-bar';
 import { LiveDialogue } from '@/components/workspace/live-dialogue';
 import { NegotiationMatrix } from '@/components/workspace/negotiation-matrix';
@@ -9,12 +10,10 @@ import {
   HISTORY_ANCHOR_ID,
   RecommendationReveal,
 } from '@/components/workspace/recommendation-reveal';
-import { SeededWorkspace } from '@/components/workspace/seeded-workspace';
 import { WorkspaceHeader } from '@/components/workspace/workspace-header';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { api } from '@/lib/api';
-import { isSeedRfqId } from '@/lib/seed-rfq';
 import { useStreamContext } from '@/lib/stream-context';
 
 export const Route = createFileRoute('/quotations/$id')({
@@ -23,11 +22,6 @@ export const Route = createFileRoute('/quotations/$id')({
 
 function QuotationWorkspace() {
   const { id } = Route.useParams();
-
-  if (isSeedRfqId(id)) {
-    return <SeededWorkspace />;
-  }
-
   return <RealWorkspace id={id} />;
 }
 
@@ -73,6 +67,11 @@ function RealWorkspace({ id }: { id: string }) {
   }
 
   const { quotation, lines, negotiations } = data;
+
+  if (quotation.status === 'awaiting_quote') {
+    return <AwaitingQuoteWorkspace q={quotation} />;
+  }
+
   const winnerNegId = quotation.recommendedNegotiationId;
   const maxRounds = Math.max(0, ...negotiations.map((n) => n.roundsCount));
   const isPreNegotiation =
