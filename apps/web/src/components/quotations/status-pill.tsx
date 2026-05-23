@@ -1,7 +1,10 @@
 import type { QuotationStatus } from '@app/shared';
 import { cn } from '@/lib/utils';
 
-const COPY: Record<QuotationStatus, string> = {
+type UiStatus = QuotationStatus | 'awaiting';
+
+const COPY: Record<UiStatus, string> = {
+  awaiting: 'Awaiting reply',
   uploaded: 'Uploaded',
   parsing: 'Parsing',
   parsed: 'Parsed',
@@ -12,7 +15,8 @@ const COPY: Record<QuotationStatus, string> = {
   failed: 'Failed',
 };
 
-const DOT: Record<QuotationStatus, string> = {
+const DOT: Record<UiStatus, string> = {
+  awaiting: 'bg-attention',
   uploaded: 'bg-muted-foreground/60',
   parsing: 'bg-attention animate-pulse',
   parsed: 'bg-muted-foreground/60',
@@ -27,7 +31,7 @@ export function StatusPill({
   status,
   className,
 }: {
-  status: QuotationStatus;
+  status: UiStatus;
   className?: string;
 }) {
   return (

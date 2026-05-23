@@ -3,11 +3,13 @@ import { createFileRoute } from '@tanstack/react-router';
 import { CheckCircle2, FileSpreadsheet, Sparkles } from 'lucide-react';
 import { ActivityTicker } from '@/components/workspace/activity-ticker';
 import { NegotiationMatrix } from '@/components/workspace/negotiation-matrix';
+import { SeededWorkspace } from '@/components/workspace/seeded-workspace';
 import { WhyThisWinner } from '@/components/workspace/why-this-winner';
 import { WorkspaceHeader } from '@/components/workspace/workspace-header';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { api } from '@/lib/api';
+import { isSeedRfqId } from '@/lib/seed-rfq';
 import { useNegotiationStream } from '@/lib/sse';
 
 export const Route = createFileRoute('/quotations/$id')({
@@ -17,6 +19,14 @@ export const Route = createFileRoute('/quotations/$id')({
 function QuotationWorkspace() {
   const { id } = Route.useParams();
 
+  if (isSeedRfqId(id)) {
+    return <SeededWorkspace />;
+  }
+
+  return <RealWorkspace id={id} />;
+}
+
+function RealWorkspace({ id }: { id: string }) {
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['quotation', id],
     queryFn: () => api.getQuotation(id),

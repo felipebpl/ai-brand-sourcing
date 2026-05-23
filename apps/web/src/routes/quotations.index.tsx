@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { api, type QuotationSummary } from '@/lib/api';
 import { rfqNumber } from '@/lib/rfq';
+import { SEED_RFQ } from '@/lib/seed-rfq';
 import { supplierMeta } from '@/lib/suppliers';
 import { formatRelative } from '@/lib/time';
 
@@ -88,10 +89,7 @@ function RFQsIndex() {
             message={(error as Error)?.message}
           />
         ) : null}
-        {!isLoading && !isError && rows.length === 0 ? (
-          <EmptyState onUpload={() => setUploadOpen(true)} />
-        ) : null}
-        {rows.length > 0 ? <RfqTable rows={rows} /> : null}
+        {!isLoading && !isError ? <RfqTable rows={rows} /> : null}
       </div>
 
       {isFetching && rows.length > 0 ? (
@@ -119,6 +117,7 @@ function RfqTable({ rows }: { rows: QuotationSummary[] }) {
         </tr>
       </thead>
       <tbody>
+        <SeededRow />
         {rows.map((q) => {
           const source = supplierMeta(q.sourceSupplierId);
           return (
@@ -160,26 +159,35 @@ function RfqTable({ rows }: { rows: QuotationSummary[] }) {
   );
 }
 
-function EmptyState({ onUpload }: { onUpload: () => void }) {
+function SeededRow() {
+  const source = supplierMeta(SEED_RFQ.sourceSupplierId);
   return (
-    <div className="flex h-full items-center justify-center px-8 py-16">
-      <div className="max-w-sm text-center">
-        <div className="mx-auto flex size-12 items-center justify-center rounded-full bg-accent text-primary">
-          <Plus className="size-5" />
-        </div>
-        <h3 className="mt-4 font-display text-[18px] font-semibold tracking-tight">
-          No RFQs yet
-        </h3>
-        <p className="mt-1.5 text-[13px] text-muted-foreground">
-          Drop a supplier quote. In about four minutes you'll have a
-          recommended winner across all three suppliers, with full reasoning.
-        </p>
-        <Button className="mt-5" size="sm" onClick={onUpload}>
-          <Plus className="size-3.5" />
-          New RFQ
-        </Button>
-      </div>
-    </div>
+    <tr className="group cursor-pointer border-b border-border/70 transition-colors hover:bg-muted/50">
+      <td className="px-8 py-3">
+        <Link
+          to="/quotations/$id"
+          params={{ id: SEED_RFQ.id }}
+          className="flex flex-col gap-0.5"
+        >
+          <span className="font-mono text-[12.5px] font-medium text-foreground">
+            {SEED_RFQ.number}
+          </span>
+          <span className="truncate text-[11.5px] text-muted-foreground">
+            {SEED_RFQ.productsTarget} products · {SEED_RFQ.unitsTarget.toLocaleString()} units
+          </span>
+        </Link>
+      </td>
+      <td className="py-3 text-foreground">{source.label}</td>
+      <td className="py-3">
+        <StatusPill status="awaiting" />
+      </td>
+      <td className="max-w-[360px] truncate py-3 text-muted-foreground">
+        <span className="italic">Awaiting the supplier to send their quote</span>
+      </td>
+      <td className="py-3 pr-8 text-right tabular text-muted-foreground">
+        Due Jun 15
+      </td>
+    </tr>
   );
 }
 
