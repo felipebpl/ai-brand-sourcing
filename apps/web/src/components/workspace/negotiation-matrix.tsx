@@ -1,11 +1,15 @@
-import { Link } from '@tanstack/react-router';
-import { ArrowRight, Star, Trophy } from 'lucide-react';
+import { Star, Trophy } from 'lucide-react';
 import type {
   NegotiationMessageRow,
   NegotiationRow,
   QuotationDetailResponse,
   QuotationLineRow,
 } from '@/lib/api';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import { delta, money } from '@/lib/format';
 import { accentClasses, supplierMeta } from '@/lib/suppliers';
 import { formatRelative } from '@/lib/time';
@@ -110,6 +114,9 @@ export function NegotiationMatrix({
                     n.id === leadingByPriceId && n.id !== winnerNegotiationId
                   }
                   isTerminal={isTerminal}
+                  supplierAccent={accentClasses(
+                    supplierMeta(n.supplierId).accent,
+                  )}
                 />
               </th>
             ))}
@@ -283,20 +290,20 @@ function LineItemCell({ line }: { line: QuotationLineRow }) {
 }
 
 function SupplierColumnHeader({
-  quotationId,
   negotiation,
   isWinner,
   isLeading,
   isTerminal,
+  supplierAccent,
 }: {
   quotationId: string;
   negotiation: NegotiationRow;
   isWinner: boolean;
   isLeading: boolean;
   isTerminal: boolean;
+  supplierAccent: ReturnType<typeof accentClasses>;
 }) {
   const meta = supplierMeta(negotiation.supplierId);
-  const accent = accentClasses(meta.accent);
 
   return (
     <div className="relative flex h-full flex-col p-4">
@@ -310,8 +317,8 @@ function SupplierColumnHeader({
         <div
           className={cn(
             'flex size-8 shrink-0 items-center justify-center rounded-full text-[10.5px] font-semibold',
-            accent.bg,
-            accent.text,
+            supplierAccent.bg,
+            supplierAccent.text,
           )}
         >
           {meta.initials}
@@ -348,55 +355,125 @@ function SupplierColumnHeader({
         </div>
       ) : null}
 
-      <Link
-        to="/quotations/$id/negotiations/$negotiationId"
-        params={{ id: quotationId, negotiationId: negotiation.id }}
-        className="mt-3 inline-flex w-full items-center justify-between rounded-md border border-border bg-background px-2.5 py-1.5 text-[11.5px] font-medium text-foreground transition-colors hover:bg-muted"
-      >
-        <span>View thread</span>
-        <ArrowRight className="size-3" />
-      </Link>
-
-      <TurnTrail messages={negotiation.messages} supplierLabel={meta.shortLabel} />
+      <TurnGrid
+        messages={negotiation.messages}
+        supplierShort={meta.shortLabel}
+        supplierAccent={supplierAccent}
+      />
     </div>
   );
 }
 
-function TurnTrail({
+function TurnGrid({
   messages,
-  supplierLabel,
+  supplierShort,
+  supplierAccent,
 }: {
   messages: NegotiationMessageRow[];
-  supplierLabel: string;
+  supplierShort: string;
+  supplierAccent: ReturnType<typeof accentClasses>;
 }) {
   if (messages.length === 0) {
     return (
-      <div className="mt-3 text-[10.5px] italic text-muted-foreground">
+      <div className="mt-3 rounded-md border border-dashed border-border bg-muted/30 px-2 py-3 text-center text-[10.5px] italic text-muted-foreground">
         No turns yet.
       </div>
     );
   }
-  const recent = messages.slice(-4).reverse();
+
+  const PARAM_LABELS = ['Unit', 'Lead', 'Payment'];
+  const sorted = [...messages].sort((a, b) => a.turnIndex - b.turnIndex);
+
   return (
-    <div className="mt-3 space-y-2">
-      <div className="text-[9.5px] font-semibold uppercase tracking-wider text-muted-foreground">
-        Latest turns
+    <div className="mt-3 overflow-hidden rounded-md border border-border bg-background">
+      <div className="border-b border-border bg-muted/40 px-2 py-1 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
+        Turn-by-turn
       </div>
-      <ol className="space-y-2">
-        {recent.map((m) => (
-          <TurnRow key={m.id} message={m} supplierLabel={supplierLabel} />
-        ))}
-      </ol>
+      <div className="overflow-x-auto">
+        <table className="w-full border-collapse text-[10.5px] tabular">
+          <thead>
+            <tr>
+              <th className="sticky left-0 z-10 w-[58px] bg-background px-2 py-1 text-left font-medium text-muted-foreground" />
+              {sorted.map((m) => {
+                const isBrand = m.role === 'brand';
+                return (
+                  <th
+                    key={m.id}
+                    className={cn(
+                      'min-w-[52px] border-l border-border px-1.5 py-1 text-center',
+                      isBrand
+                        ? 'bg-foreground/[0.04]'
+                        : cn(supplierAccent.bg, 'opacity-60'),
+                    )}
+                  >
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          className="flex flex-col items-center gap-0.5 text-[9px] uppercase tracking-wider text-foreground/80 hover:text-foreground"
+                        >
+                          <span className="font-semibold">
+                            R{m.turnIndex + 1}
+                          </span>
+                          <span className="text-[8.5px]">
+                            {isBrand ? 'Valden' : supplierShort}
+                          </span>
+                        </button>
+                      </TooltipTrigger>
+                      <TurnTooltip message={m} supplierShort={supplierShort} />
+                    </Tooltip>
+                  </th>
+                );
+              })}
+            </tr>
+          </thead>
+          <tbody>
+            {PARAM_LABELS.map((label, i) => (
+              <tr key={label} className="border-t border-border">
+                <th className="sticky left-0 z-10 w-[58px] bg-background px-2 py-1 text-left text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  {label}
+                </th>
+                {sorted.map((m) => {
+                  const isBrand = m.role === 'brand';
+                  const value = paramValue(m, i);
+                  return (
+                    <td
+                      key={m.id}
+                      className={cn(
+                        'min-w-[52px] border-l border-border px-1.5 py-1 text-center font-mono tabular',
+                        isBrand
+                          ? 'bg-foreground/[0.02] text-foreground'
+                          : cn(supplierAccent.bg, 'opacity-95 text-foreground'),
+                        !value && 'text-muted-foreground/50',
+                      )}
+                    >
+                      {value ?? '·'}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
 
-function TurnRow({
+function paramValue(m: NegotiationMessageRow, index: number): string | null {
+  if (!m.offer) return null;
+  if (index === 0) return `$${m.offer.unitPriceAvg.toFixed(2)}`;
+  if (index === 1) return `${m.offer.leadTimeDays}d`;
+  if (index === 2) return m.offer.paymentTerms.display;
+  return null;
+}
+
+function TurnTooltip({
   message,
-  supplierLabel,
+  supplierShort,
 }: {
   message: NegotiationMessageRow;
-  supplierLabel: string;
+  supplierShort: string;
 }) {
   const isBrand = message.role === 'brand';
   const intent =
@@ -406,42 +483,36 @@ function TurnRow({
           | undefined)
       : undefined;
   const intentLabel = intent ? TURN_INTENT_LABEL[intent] : null;
+
   return (
-    <li
-      className={cn(
-        'rounded-md border border-border p-2 text-[11px] leading-snug',
-        isBrand ? 'bg-background' : 'bg-muted/40',
-      )}
-    >
-      <div className="flex items-center justify-between text-[9.5px] uppercase tracking-wider text-muted-foreground">
+    <TooltipContent side="bottom" className="max-w-[280px] p-3 text-[11.5px]">
+      <div className="flex items-center justify-between gap-2 text-[10px] font-semibold uppercase tracking-wider text-primary-foreground/70">
         <span>
-          R{message.turnIndex + 1}{' '}
-          <span className="font-semibold text-foreground">
-            {isBrand ? 'Valden' : supplierLabel}
-          </span>
+          Round {message.turnIndex + 1} ·{' '}
+          {isBrand ? 'Valden' : supplierShort}
         </span>
-        {intentLabel ? (
-          <span className="font-semibold text-foreground">{intentLabel}</span>
-        ) : null}
+        {intentLabel ? <span>{intentLabel}</span> : null}
       </div>
       {message.offer ? (
-        <div className="mt-1 flex flex-wrap items-center gap-1 font-mono text-[10.5px] tabular text-foreground">
-          <span>{money(message.offer.unitPriceAvg, message.offer.currency)}</span>
-          <span className="text-muted-foreground/50">·</span>
-          <span>{message.offer.leadTimeDays}d</span>
-          <span className="text-muted-foreground/50">·</span>
-          <span>{message.offer.paymentTerms.display}</span>
-          {message.offer.fulfillablePct < 1 ? (
-            <span className="ml-1 rounded-sm bg-attention/15 px-1 text-[9.5px] text-attention-foreground/90">
-              {Math.round(message.offer.fulfillablePct * 100)}%
-            </span>
-          ) : null}
+        <div className="mt-2 grid grid-cols-3 gap-1.5 font-mono text-[10px] tabular">
+          <Param label="Unit" value={`$${message.offer.unitPriceAvg.toFixed(2)}`} />
+          <Param label="Lead" value={`${message.offer.leadTimeDays}d`} />
+          <Param label="Payment" value={message.offer.paymentTerms.display} />
         </div>
       ) : null}
-      <p className="mt-1 line-clamp-2 text-[11px] text-foreground/85">
-        {message.content}
-      </p>
-    </li>
+      <p className="mt-2 text-[11.5px] leading-snug">{message.content}</p>
+    </TooltipContent>
+  );
+}
+
+function Param({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div className="text-[8.5px] uppercase tracking-wider text-primary-foreground/60">
+        {label}
+      </div>
+      <div className="text-primary-foreground">{value}</div>
+    </div>
   );
 }
 

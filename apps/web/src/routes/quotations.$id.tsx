@@ -4,7 +4,10 @@ import { CheckCircle2, Sparkles } from 'lucide-react';
 import { LiveDialogue } from '@/components/workspace/live-dialogue';
 import { NegotiationMatrix } from '@/components/workspace/negotiation-matrix';
 import { ParsingActivity } from '@/components/workspace/parsing-activity';
-import { RecommendationReveal } from '@/components/workspace/recommendation-reveal';
+import {
+  HISTORY_ANCHOR_ID,
+  RecommendationReveal,
+} from '@/components/workspace/recommendation-reveal';
 import { SeededWorkspace } from '@/components/workspace/seeded-workspace';
 import { WorkspaceHeader } from '@/components/workspace/workspace-header';
 import { Button } from '@/components/ui/button';
@@ -31,6 +34,15 @@ function RealWorkspace({ id }: { id: string }) {
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['quotation', id],
     queryFn: () => api.getQuotation(id),
+    refetchInterval: (query) => {
+      const status = query.state.data?.quotation.status;
+      const active =
+        status === 'uploaded' ||
+        status === 'parsing' ||
+        status === 'parsed' ||
+        status === 'negotiating';
+      return active ? 4_000 : false;
+    },
   });
 
   const { events } = useNegotiationStream(data ? id : undefined);
@@ -95,11 +107,13 @@ function RealWorkspace({ id }: { id: string }) {
             />
 
             {showLiveDialogue ? (
-              <LiveDialogue
-                quotation={quotation}
-                negotiations={negotiations}
-                events={events}
-              />
+              <div id={HISTORY_ANCHOR_ID} className="scroll-mt-6">
+                <LiveDialogue
+                  quotation={quotation}
+                  negotiations={negotiations}
+                  events={events}
+                />
+              </div>
             ) : null}
           </div>
         )}

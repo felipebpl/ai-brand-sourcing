@@ -1,21 +1,20 @@
+import { X } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { Dialog, DialogContent } from '@/components/ui/dialog';
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+} from '@/components/ui/dialog';
 import type { QuotationDetailResponse } from '@/lib/api';
 import { WhyThisWinner } from './why-this-winner';
 
 const STORAGE_PREFIX = 'rec-shown:';
+const HISTORY_ANCHOR_ID = 'negotiation-history-anchor';
 
 type Props = {
   q: QuotationDetailResponse['quotation'];
 };
 
-/**
- * When the brand reaches a recommendation, surface it as a centered
- * modal demanding attention. After the user dismisses (close button,
- * outside click, Esc), the same card eases into a fixed slot at the top
- * of the workspace. Persist "shown" per RFQ in localStorage so refreshes
- * during the same demo don't re-pop the modal endlessly.
- */
 export function RecommendationReveal({ q }: Props) {
   const key = STORAGE_PREFIX + q.id;
   const [open, setOpen] = useState(false);
@@ -47,13 +46,22 @@ export function RecommendationReveal({ q }: Props) {
     }
   };
 
+  const jumpToHistory = () => {
+    const el = document.getElementById(HISTORY_ANCHOR_ID);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
   if (!hasRecommendation) return null;
 
   return (
     <>
       {shown ? (
         <div className="motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-top-2 motion-safe:duration-500">
-          <WhyThisWinner q={q} />
+          <WhyThisWinner
+            q={q}
+            variant="inline"
+            onJumpToHistory={jumpToHistory}
+          />
         </div>
       ) : null}
       <Dialog
@@ -62,10 +70,26 @@ export function RecommendationReveal({ q }: Props) {
           if (!next) dismiss();
         }}
       >
-        <DialogContent className="max-w-3xl border-none bg-transparent p-0 shadow-none">
-          <WhyThisWinner q={q} />
+        <DialogContent
+          showCloseButton={false}
+          className="max-w-5xl border-none bg-transparent p-0 shadow-none sm:max-w-5xl"
+        >
+          <div className="relative">
+            <DialogClose asChild>
+              <button
+                type="button"
+                aria-label="Close"
+                className="absolute -top-3 -right-3 z-10 flex size-8 items-center justify-center rounded-full border border-border bg-card text-foreground shadow-sm transition-colors hover:bg-muted"
+              >
+                <X className="size-4" />
+              </button>
+            </DialogClose>
+            <WhyThisWinner q={q} variant="modal" />
+          </div>
         </DialogContent>
       </Dialog>
     </>
   );
 }
+
+export { HISTORY_ANCHOR_ID };

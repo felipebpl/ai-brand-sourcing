@@ -134,57 +134,54 @@ function StepIcon({ state }: { state: Step['state'] }) {
   );
 }
 
-type ToolPhrase = {
-  label: string;
-  describe?: (input: Record<string, unknown>) => string | undefined;
-};
-
-const TOOLS: Record<string, ToolPhrase> = {
-  Bash: {
-    label: 'Inspecting the workbook',
-    describe: (input) => {
-      const cmd = typeof input.command === 'string' ? input.command : '';
-      if (cmd.includes('wb.sheetnames')) return 'Listing sheets';
-      if (cmd.includes('ws[') || cmd.includes('cell(')) return 'Reading cells';
-      if (cmd.includes('merged_cells')) return 'Resolving merged cells';
-      if (cmd.includes('iter_rows')) return 'Scanning the products table';
-      return undefined;
-    },
-  },
-  Read: { label: 'Reading the file structure' },
-  mcp__parser__lookup_catalog: {
-    label: 'Matching SKU against the catalog',
-    describe: (input) => {
-      const raw =
-        typeof input.rawSku === 'string'
-          ? (input.rawSku as string)
-          : typeof input.sku === 'string'
-          ? (input.sku as string)
-          : null;
-      return raw ? `lookup · ${raw}` : undefined;
-    },
-  },
-  mcp__parser__submit_extraction: {
-    label: 'Finalizing the structured extraction',
-  },
-};
-
 function describeToolStep(
   toolName: string,
   input: unknown,
-): { label: string; detail?: string } {
-  const cfg = TOOLS[toolName];
-  if (!cfg) {
-    return {
-      label: humanizeUnknownTool(toolName),
-    };
-  }
+): { key: string; label: string; detail?: string } {
   const inputObj =
     input && typeof input === 'object'
       ? (input as Record<string, unknown>)
       : {};
-  const detail = cfg.describe?.(inputObj);
-  return { label: cfg.label, detail };
+
+  if (toolName === 'Bash') {
+    const cmd = typeof inputObj.command === 'string' ? inputObj.command : '';
+    if (cmd.includes('wb.sheetnames'))
+      return { key: 'bash:sheets', label: 'Listing sheets in the workbook' };
+    if (cmd.includes('merged_cells'))
+      return { key: 'bash:merged', label: 'Resolving merged cells' };
+    if (cmd.includes('iter_rows'))
+      return { key: 'bash:rows', label: 'Scanning the products table' };
+    if (cmd.includes('cell(') || cmd.includes('ws['))
+      return { key: 'bash:cells', label: 'Reading individual cells' };
+    return { key: 'bash:other', label: 'Looking through the file' };
+  }
+
+  if (toolName === 'Read') {
+    return { key: 'read', label: 'Reading the file structure' };
+  }
+
+  if (toolName === 'mcp__parser__lookup_catalog') {
+    const raw =
+      typeof inputObj.rawSku === 'string'
+        ? (inputObj.rawSku as string)
+        : typeof inputObj.sku === 'string'
+        ? (inputObj.sku as string)
+        : null;
+    return {
+      key: 'lookup_catalog',
+      label: 'Matching SKUs against the catalog',
+      detail: raw ? `looking up ${raw}` : undefined,
+    };
+  }
+
+  if (toolName === 'mcp__parser__submit_extraction') {
+    return {
+      key: 'submit_extraction',
+      label: 'Finalizing the structured extraction',
+    };
+  }
+
+  return { key: `t:${toolName}`, label: humanizeUnknownTool(toolName) };
 }
 
 function buildSteps(
@@ -200,7 +197,7 @@ function buildSteps(
   // different SKU lookups stay separate.
   const seen = new Map<
     string,
-    { toolName: string; label: string; detail?: string; latestPhase: string }
+    { label: string; detail?: string; latestPhase: string }
   >();
   for (const e of toolEvents) {
     const payload = e.payload as {
@@ -210,14 +207,13 @@ function buildSteps(
     };
     const tool = payload.toolName ?? '';
     if (!tool) continue;
-    const { label, detail } = describeToolStep(tool, payload.toolInput);
-    const key = detail ? `${tool}:${detail}` : tool;
-    const existing = seen.get(key);
+    const { key, label, detail } = describeToolStep(tool, payload.toolInput);
+    const stepKey = detail ? `${key}:${detail}` : key;
+    const existing = seen.get(stepKey);
     if (existing) {
       existing.latestPhase = payload.phase ?? existing.latestPhase;
     } else {
-      seen.set(key, {
-        toolName: tool,
+      seen.set(stepKey, {
         label,
         detail,
         latestPhase: payload.phase ?? 'pre_tool_use',

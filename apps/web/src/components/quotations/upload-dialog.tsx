@@ -79,8 +79,7 @@ export function UploadDialog({ open, onOpenChange }: Props) {
               </TooltipTrigger>
               <TooltipContent side="right" className="max-w-xs text-[12px]">
                 In a real deployment this could be auto-ingested by parsing
-                inbound emails from the supplier. The manual upload here keeps
-                that path open while letting you trigger the flow on demand.
+                inbound emails from the supplier.
               </TooltipContent>
             </Tooltip>
           </DialogTitle>
