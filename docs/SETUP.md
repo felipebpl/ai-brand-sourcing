@@ -33,11 +33,18 @@ the dependencies:
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+PIP_INDEX_URL=https://pypi.org/simple/ pip install -r requirements.txt
 ```
 
+The explicit `PIP_INDEX_URL` is defensive — some setups (corporate
+`pip.conf`, AWS CodeArtifact, etc.) route `pip` through a private mirror
+that may not have `openpyxl`/`pandas`. Forcing the public PyPI for this
+project's deps avoids that.
+
 Activate `.venv` in every shell that runs the API (or set up
-direnv/auto-activation).
+direnv/auto-activation). The Agent SDK subprocess inherits `PATH` from
+your shell, so the venv must be active before `bun dev:api` for the
+parser subagent's `python3` calls to find `openpyxl`.
 
 ## 3. Configure environment
 
