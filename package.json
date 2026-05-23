@@ -17,6 +17,7 @@
     "db:stop": "supabase stop",
     "db:status": "supabase status",
     "db:push": "bun --filter @app/api db:push",
+    "db:seed": "bun --filter @app/api db:seed",
     "db:studio": "bun --filter @app/api db:studio",
     "typecheck": "bun --filter '*' typecheck",
     "lint": "bun --filter '*' lint",
