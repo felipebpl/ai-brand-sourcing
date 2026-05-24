@@ -76,9 +76,11 @@ export class ClaudeParserAdapter implements ParserPort {
     userInstruction: string | null;
   }): Promise<ParseResult> {
     let captured: QuotationExtraction | undefined;
+    let extractionCapturedAt: number | null = null;
     const sink: SubmitExtractionSink = {
       async accept(extraction) {
         captured = extraction;
+        extractionCapturedAt = Date.now();
       },
     };
 
@@ -172,7 +174,8 @@ export class ClaudeParserAdapter implements ParserPort {
     });
 
     let success: SDKResultSuccess | undefined;
-    for await (const message of query({ prompt: userPrompt, options })) {
+    const iter = query({ prompt: userPrompt, options });
+    for await (const message of iter) {
       await publishAssistantText({
         quotationId: input.quotationId,
         eventBus: this.eventBus,
@@ -182,6 +185,23 @@ export class ClaudeParserAdapter implements ParserPort {
       });
       if (message.type === 'result' && message.subtype === 'success') {
         success = message;
+      }
+
+      // Defensive exit: stopOnSubmit asks the SDK to halt after
+      // submit_extraction, but the model can still trail commentary
+      // and the result message sometimes never lands cleanly. As soon
+      // as we have the extraction in hand, give the SDK ~3s to wrap
+      // up and then force-close the iterator so the run doesn't hang.
+      if (captured && extractionCapturedAt !== null) {
+        const elapsed = Date.now() - extractionCapturedAt;
+        if (success || elapsed > 3_000) {
+          try {
+            await iter.return?.(undefined);
+          } catch {
+            // Iterator already closed — fine.
+          }
+          break;
+        }
       }
     }
 
@@ -196,12 +216,9 @@ export class ClaudeParserAdapter implements ParserPort {
             durationMs: success.duration_ms,
             turns: success.num_turns,
           }
-        : { aborted: true },
+        : { forced: true },
     });
 
-    if (!success) {
-      throw new Error('Parser run did not yield a success result');
-    }
     if (!captured) {
       throw new Error(
         'Parser run completed without calling submit_extraction (terminal tool)',
@@ -220,9 +237,10 @@ export class ClaudeParserAdapter implements ParserPort {
       payload: {
         lineCount: captured.lines.length,
         ambiguityCount: captured.ambiguities.length,
-        costUsd: success.total_cost_usd,
-        durationMs: success.duration_ms,
-        turns: success.num_turns,
+        costUsd: success?.total_cost_usd ?? null,
+        durationMs: success?.duration_ms ?? null,
+        turns: success?.num_turns ?? null,
+        resultLanded: success != null,
       },
       occurredAt: new Date().toISOString(),
     });
