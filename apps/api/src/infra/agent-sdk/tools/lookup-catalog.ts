@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { tool } from '@anthropic-ai/claude-agent-sdk';
 import type { DB } from '../../../db';
+import { rawRows } from '../../../db/raw';
 
 /**
  * `lookup_catalog` MCP tool — fuzzy search the brand's product catalog
@@ -56,14 +57,16 @@ export function makeLookupCatalogTool(db: DB) {
       'Use whenever a raw SKU does not verbatim match a catalog entry.',
     LookupCatalogInputSchema,
     async ({ query, limit }) => {
-      const result = await db.execute<CatalogRow>(sql`
-        SELECT sku, name, color, similarity(sku, ${query}) AS sim
-        FROM   product
-        WHERE  similarity(sku, ${query}) > 0.2
-        ORDER  BY sim DESC
-        LIMIT  ${limit}
-      `);
-      const rows = (result as unknown as { rows: CatalogRow[] }).rows;
+      const rows = await rawRows<CatalogRow>(
+        db,
+        sql`
+          SELECT sku, name, color, similarity(sku, ${query}) AS sim
+          FROM   product
+          WHERE  similarity(sku, ${query}) > 0.2
+          ORDER  BY sim DESC
+          LIMIT  ${limit}
+        `,
+      );
       const candidates = rows.map((r) => ({
         sku: r.sku,
         name: r.name,

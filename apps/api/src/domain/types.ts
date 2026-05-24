@@ -15,6 +15,7 @@ export type {
   SupplierId,
   PaymentTerms,
   NegotiationOffer,
+  BaselineOffer,
   NegotiationMessage,
   NegotiationMessageRole,
   NegotiationStatus,
@@ -67,11 +68,12 @@ export interface CatalogHit {
 }
 
 /**
- * Top-level result of the parser stage: the typed quotation + an "intent"
- * structured projection extracted from the user's free-text instruction.
+ * Top-level result of the parser stage: the typed quotation extraction.
+ * User instruction intent is extracted in a separate stage (Haiku call
+ * in the quotations pipeline) so the parser subagent stays focused on
+ * the spreadsheet and doesn't conflate two concerns.
  */
 export interface ParseResult {
   quotationId: string;
   extraction: import('@app/shared').QuotationExtraction;
-  intent: import('@app/shared').UserInstructionIntent;
 }

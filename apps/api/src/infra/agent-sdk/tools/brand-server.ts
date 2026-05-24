@@ -19,6 +19,7 @@ import { makeWalkAwayTool } from './walk-away';
  */
 export function makeBrandMcpServer(args: {
   db: DB;
+  quotationId: string;
   suppliers: AskSuppliersConfig['suppliers'];
   negotiationIdBySupplier: ReadonlyMap<string, string>;
   recommendationSink: SubmitRecommendationSink;
@@ -34,6 +35,7 @@ export function makeBrandMcpServer(args: {
     tools: [
       makeAskSuppliersTool({
         db: args.db,
+        quotationId: args.quotationId,
         suppliers: args.suppliers,
       }),
       makeWalkAwayTool({

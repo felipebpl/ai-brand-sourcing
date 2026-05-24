@@ -25,6 +25,7 @@ from openpyxl.utils import get_column_letter
 
 
 MAX_PREVIEW_ROWS = 25
+MAX_TAIL_ROWS = 10
 MAX_COL_WIDTH = 30
 
 
@@ -99,10 +100,10 @@ def inspect_workbook(path: Path) -> None:
             )[:6]:
                 print(f"     {count:>3}×  {fmt!r}")
 
-        # Row preview — both formulas and computed values
-        print(f"   first {MAX_PREVIEW_ROWS} rows (formula | value):")
-        rows_to_show = min(ws_f.max_row, MAX_PREVIEW_ROWS)
-        for r in range(1, rows_to_show + 1):
+        # Row preview — both formulas and computed values.
+        # Head + tail so footer metadata (Payment Terms, Lead Time)
+        # that sits past the head window is not blind-spotted.
+        def render_row(r: int) -> None:
             cells = []
             for c in range(1, min(ws_f.max_column, 9) + 1):
                 cf = ws_f.cell(row=r, column=c).value
@@ -114,6 +115,19 @@ def inspect_workbook(path: Path) -> None:
             line = " | ".join(cells)
             if any(c for c in cells if c):
                 print(f"     r{r:>2}: {line}")
+
+        head_end = min(ws_f.max_row, MAX_PREVIEW_ROWS)
+        print(f"   first {MAX_PREVIEW_ROWS} rows (formula | value):")
+        for r in range(1, head_end + 1):
+            render_row(r)
+
+        if ws_f.max_row > MAX_PREVIEW_ROWS:
+            tail_start = max(MAX_PREVIEW_ROWS + 1, ws_f.max_row - MAX_TAIL_ROWS + 1)
+            if tail_start > MAX_PREVIEW_ROWS + 1:
+                print(f"     ... rows {MAX_PREVIEW_ROWS + 1} to {tail_start - 1} elided ...")
+            print(f"   last rows {tail_start}..{ws_f.max_row}:")
+            for r in range(tail_start, ws_f.max_row + 1):
+                render_row(r)
         print()
 
 

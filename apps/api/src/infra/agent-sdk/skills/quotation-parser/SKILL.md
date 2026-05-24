@@ -68,8 +68,11 @@ reason and you'll handle situations the playbook doesn't cover.
 Before doing anything analytical, **run `python3 scripts/inspect_xlsx.py
 <file_path>`** (path relative to this skill folder). It dumps sheet
 names, dimensions, merged-cell counts, the first 25 rows of each sheet
-with formulas and values, and the detected number formats. One Bash
-call, ~50 lines of output, and you have a map of the territory.
+plus the last 10 rows (with an elision marker for large files — so
+footer-format metadata like `Payment Terms: 40/60` or
+`Lead Time: 90 days` is always visible), and the detected number
+formats. One Bash call, ~50 lines of output, and you have a map of the
+territory.
 
 Why: every parse you'll do starts with the same orientation. Bundling
 this saves a turn and standardizes what you see across files.

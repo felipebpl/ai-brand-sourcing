@@ -9,6 +9,7 @@ import type {
   UserInstructionIntent,
 } from '../domain';
 import type { DB } from '../db';
+import { rawRows } from '../db/raw';
 import { negotiation, quotation, quotationLine, supplier } from '../db/schema';
 import { ClaudeBrandAgentAdapter } from '../infra/agent-sdk/adapters/brand-agent.claude';
 import { ClaudeSupplierAgentAdapter } from '../infra/agent-sdk/adapters/supplier-agent.claude';
@@ -156,41 +157,36 @@ export async function runNegotiation(args: {
     };
   }
 
-  // Compute the baseline (S1's quotation) from parsed_metadata + lines.
   const metadata =
     (row.parsedMetadata as Record<string, unknown> | null) ?? {};
-  const baselineUnitAvg =
-    lineRows.reduce((sum, l) => sum + Number(l.quantity) * 0, 0); // placeholder
-  // Compute actual average from lines:
-  const unitPriceRows = await db.execute<{ avg_unit_price: string }>(
+
+  const computedRows = await rawRows<{ avg_unit_price: string | null }>(
+    db,
     sql`SELECT (sum(unit_price * min_qty) / NULLIF(sum(min_qty),0))::numeric(14,4) AS avg_unit_price FROM quotation_line WHERE quotation_id = ${quotationId}`,
   );
-  const computedRows =
-    (unitPriceRows as unknown as { rows: { avg_unit_price: string | null }[] }).rows;
-  const baselineAvgPrice = Number(
-    computedRows[0]?.avg_unit_price ?? baselineUnitAvg,
-  );
+  const avgRaw = computedRows[0]?.avg_unit_price;
+  if (avgRaw === null || avgRaw === undefined) {
+    return {
+      kind: 'failed',
+      quotationId,
+      error: 'Cannot compute baseline: quotation_line has no unit prices',
+    };
+  }
+  const baselineAvgPrice = Number(avgRaw);
+
+  const validCurrencies = ['USD', 'BRL', 'EUR', 'CNY', 'GBP'] as const;
+  type ValidCurrency = (typeof validCurrencies)[number];
   const baseline = {
     unitPriceAvg: baselineAvgPrice,
     leadTimeDays:
-      (typeof metadata.leadTimeDays === 'number' ? metadata.leadTimeDays : null) ??
-      50,
-    paymentTerms: {
-      installments: [
-        { percent: 33.33, dueDays: 0 },
-        { percent: 33.33, dueDays: 30 },
-        { percent: 33.34, dueDays: 60 },
-      ],
-      display:
-        (typeof metadata.paymentTerms === 'string'
-          ? metadata.paymentTerms
-          : null) ?? '33/33/33',
-    },
+      typeof metadata.leadTimeDays === 'number' ? metadata.leadTimeDays : null,
+    paymentTermsDisplay:
+      typeof metadata.paymentTerms === 'string' ? metadata.paymentTerms : null,
     currency:
-      (metadata.currency as 'USD' | 'BRL' | 'EUR' | 'CNY' | 'GBP' | undefined) ??
-      'USD',
-    fulfillablePct: 1,
-    notes: null,
+      typeof metadata.currency === 'string' &&
+      (validCurrencies as readonly string[]).includes(metadata.currency)
+        ? (metadata.currency as ValidCurrency)
+        : 'USD',
   };
 
   const intent: UserInstructionIntent =
@@ -286,16 +282,6 @@ export async function runNegotiation(args: {
     .update(negotiation)
     .set({ status: 'concluded', concludedAt: sql`now()` })
     .where(eq(negotiation.id, recommendation.negotiationId));
-
-  // Mark the source supplier name on the supplier row if it was a
-  // placeholder (Quotation 2 has no supplier name; q1 'Thai Textiles').
-  const supplierName = (metadata.supplierName as string | null) ?? null;
-  if (supplierName && supplierName.length > 0) {
-    await db
-      .update(supplier)
-      .set({ name: supplierName })
-      .where(eq(supplier.id, row.sourceSupplierId));
-  }
 
   return {
     kind: 'recommended',

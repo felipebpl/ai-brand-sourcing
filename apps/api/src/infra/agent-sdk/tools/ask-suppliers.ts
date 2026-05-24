@@ -1,4 +1,4 @@
-import { eq, sql } from 'drizzle-orm';
+import { sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { tool } from '@anthropic-ai/claude-agent-sdk';
 import type {
@@ -7,7 +7,8 @@ import type {
   SupplierAgentResponse,
 } from '../../../domain';
 import type { DB } from '../../../db';
-import { negotiation, negotiationMessage } from '../../../db/schema';
+import { negotiationMessage } from '../../../db/schema';
+import { rawRows } from '../../../db/raw';
 
 /**
  * `ask_suppliers` MCP tool — the brand agent's main lever.
@@ -76,6 +77,12 @@ interface SupplierContext {
 export interface AskSuppliersConfig {
   db: DB;
   /**
+   * The quotation under which all suppliers are being engaged. Propagated
+   * to each supplier's `respond` call so live trace events route to the
+   * correct SSE subscriber on the frontend.
+   */
+  quotationId: string;
+  /**
    * Resolves a supplierId to the adapter + negotiationId + the items the
    * brand passed in. Throws if the supplierId is unknown (brand asked
    * a non-existent supplier).
@@ -141,6 +148,7 @@ export function makeAskSuppliersTool(config: AskSuppliersConfig) {
               ctx.negotiationId,
             );
             const response = await ctx.adapter.respond({
+              quotationId: config.quotationId,
               negotiationId: ctx.negotiationId,
               brandMessage: ask.message,
               brandAsk: (ask.brandAsk ?? null) as NegotiationOffer | null,
@@ -174,10 +182,10 @@ async function reserveNextTurn(
   db: DB,
   negotiationId: string,
 ): Promise<number> {
-  const result = await db.execute<{ max: number | null }>(
+  const rows = await rawRows<{ max: number | null }>(
+    db,
     sql`SELECT max(turn_index) AS max FROM negotiation_message WHERE negotiation_id = ${negotiationId}`,
   );
-  const rows = (result as unknown as { rows: { max: number | null }[] }).rows;
   const current = rows[0]?.max ?? -1;
   return current + 1;
 }
@@ -186,15 +194,10 @@ async function getLastTurnIndex(
   db: DB,
   negotiationId: string,
 ): Promise<number> {
-  const result = await db.execute<{ max: number | null }>(
+  const rows = await rawRows<{ max: number | null }>(
+    db,
     sql`SELECT max(turn_index) AS max FROM negotiation_message WHERE negotiation_id = ${negotiationId}`,
   );
-  const rows = (result as unknown as { rows: { max: number | null }[] }).rows;
   return rows[0]?.max ?? 0;
 }
 
-// Silence the unused-import linter for `negotiation` and `eq` if not
-// referenced — keep them imported for symmetry with adapters that may
-// need them later.
-void negotiation;
-void eq;

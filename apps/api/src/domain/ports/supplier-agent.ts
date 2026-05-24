@@ -25,6 +25,11 @@ export interface SupplierAgentPort {
 }
 
 export interface SupplierAgentRespondInput {
+  /**
+   * The quotation the supplier is responding within. Used to scope live
+   * trace events to the right SSE subscriber on the frontend.
+   */
+  quotationId: string;
   negotiationId: string;
   /**
    * The brand's most recent message on this negotiation thread.

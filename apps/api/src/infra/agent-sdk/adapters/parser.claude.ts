@@ -8,7 +8,6 @@ import type {
   EventBusPort,
   ParserPort,
   ParseResult,
-  UserInstructionIntent,
   QuotationExtraction,
 } from '../../../domain';
 import type { DB } from '../../../db';
@@ -31,22 +30,23 @@ import type { SubmitExtractionSink } from '../tools/submit-extraction';
  *
  * Spawns a Claude `query()` configured as the parser subagent:
  *   - model: Claude Sonnet 4.6 via model-router
- *   - skill: quotation-parser loaded from the in-repo skill bundle
+ *   - system prompt: PARSER_SUBAGENT_SYSTEM_PROMPT (inlined skill content)
  *   - tools: Bash, Read, Write (for Python via Bash) +
  *            mcp__parser__lookup_catalog, mcp__parser__submit_extraction
- *   - settingSources: ['project'] so the skill folder is discovered
- *   - permissionMode: 'bypassPermissions' is INTENTIONAL here because
- *     the parser must run python3 noninteractively. We mitigate by:
- *       * scoping `cwd` to the workspace root
- *       * disallowing dangerous tools (no Edit, no WebFetch)
- *       * `allowDangerouslySkipPermissions: true` is required by the
- *         SDK to confirm intent
+ *   - settingSources: [] — project-skills mechanism is not used; the
+ *     skill content is inlined in the system prompt to save a Read turn
+ *   - permissionMode: 'bypassPermissions' is INTENTIONAL: the parser
+ *     must run python3 non-interactively. Mitigations:
+ *       * `cwd` scoped to the workspace root
+ *       * `disallowedTools` blocks Edit/WebFetch/WebSearch/Agent/Glob/Grep
+ *       * hard caps `maxTurns: 25`, `maxBudgetUsd: 0.5`
+ *       * `allowDangerouslySkipPermissions: true` confirms intent
  *
  * The terminal `mcp__parser__submit_extraction` tool captures the typed
  * payload into a sink that resolves the returned Promise.
  *
- * Hard caps (`maxTurns: 20`, `maxBudgetUsd: 0.20`) protect against
- * runaway tool loops on adversarial files.
+ * Hard caps (`maxTurns: 25`, `maxBudgetUsd: 0.5`) match ADR-014's
+ * validated cost envelope across the four sample quotations.
  */
 export class ClaudeParserAdapter implements ParserPort {
   private readonly sessionStore: PgSessionStore;
@@ -76,9 +76,11 @@ export class ClaudeParserAdapter implements ParserPort {
     userInstruction: string | null;
   }): Promise<ParseResult> {
     let captured: QuotationExtraction | undefined;
+    let extractionCapturedAt: number | null = null;
     const sink: SubmitExtractionSink = {
       async accept(extraction) {
         captured = extraction;
+        extractionCapturedAt = Date.now();
       },
     };
 
@@ -172,7 +174,8 @@ export class ClaudeParserAdapter implements ParserPort {
     });
 
     let success: SDKResultSuccess | undefined;
-    for await (const message of query({ prompt: userPrompt, options })) {
+    const iter = query({ prompt: userPrompt, options });
+    for await (const message of iter) {
       await publishAssistantText({
         quotationId: input.quotationId,
         eventBus: this.eventBus,
@@ -182,6 +185,23 @@ export class ClaudeParserAdapter implements ParserPort {
       });
       if (message.type === 'result' && message.subtype === 'success') {
         success = message;
+      }
+
+      // Defensive exit: stopOnSubmit asks the SDK to halt after
+      // submit_extraction, but the model can still trail commentary
+      // and the result message sometimes never lands cleanly. As soon
+      // as we have the extraction in hand, give the SDK ~3s to wrap
+      // up and then force-close the iterator so the run doesn't hang.
+      if (captured && extractionCapturedAt !== null) {
+        const elapsed = Date.now() - extractionCapturedAt;
+        if (success || elapsed > 3_000) {
+          try {
+            await iter.return?.(undefined);
+          } catch {
+            // Iterator already closed — fine.
+          }
+          break;
+        }
       }
     }
 
@@ -196,22 +216,14 @@ export class ClaudeParserAdapter implements ParserPort {
             durationMs: success.duration_ms,
             turns: success.num_turns,
           }
-        : { aborted: true },
+        : { forced: true },
     });
 
-    if (!success) {
-      throw new Error('Parser run did not yield a success result');
-    }
     if (!captured) {
       throw new Error(
         'Parser run completed without calling submit_extraction (terminal tool)',
       );
     }
-
-    const intent: UserInstructionIntent = {
-      priority: 'balanced',
-      constraints: {},
-    };
 
     await this.eventBus.publish({
       id: crypto.randomUUID(),
@@ -220,9 +232,10 @@ export class ClaudeParserAdapter implements ParserPort {
       payload: {
         lineCount: captured.lines.length,
         ambiguityCount: captured.ambiguities.length,
-        costUsd: success.total_cost_usd,
-        durationMs: success.duration_ms,
-        turns: success.num_turns,
+        costUsd: success?.total_cost_usd ?? null,
+        durationMs: success?.duration_ms ?? null,
+        turns: success?.num_turns ?? null,
+        resultLanded: success != null,
       },
       occurredAt: new Date().toISOString(),
     });
@@ -230,7 +243,6 @@ export class ClaudeParserAdapter implements ParserPort {
     return {
       quotationId: input.quotationId,
       extraction: captured,
-      intent,
     };
   }
 }

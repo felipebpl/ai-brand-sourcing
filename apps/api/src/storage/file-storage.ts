@@ -48,7 +48,7 @@ export async function saveUpload(args: {
   };
 }
 
-function sanitizeFilename(name: string): string {
+export function sanitizeFilename(name: string): string {
   // Strip directory parts, keep alphanum + dots + dashes + underscores.
   const base = name.split(/[\\/]/).pop() ?? 'upload.xlsx';
   return base.replace(/[^A-Za-z0-9._-]+/g, '_').slice(0, 120) || 'upload.xlsx';

@@ -4,9 +4,12 @@ import { handlePurchaseOrderRequested } from './functions/handle-purchase-order-
 /**
  * Inngest function registry.
  *
- * Three events drive the system; two have handlers today, the third
- * (`supplier/message` curveball) lands in Step 7 once the brand's
- * `reactToSupplierMessage` is implemented.
+ * Two user-driven handlers are wired: parse-and-negotiate on upload, and
+ * PO materialization on commit. The `supplier/message` event type stays
+ * declared in the typed schema for forward compatibility, but the
+ * curveball flow for this trial is handled intra-negotiation via the
+ * supplier-2 persona reveal (see `prompts/supplier-persona.ts`) — no
+ * external `handle.supplier-message` function is needed.
  */
 export const functions = [
   handleQuotationUploaded,

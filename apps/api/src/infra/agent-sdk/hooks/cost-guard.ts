@@ -1,4 +1,5 @@
 import type { HookCallback } from '@anthropic-ai/claude-agent-sdk';
+import { asStop } from './_input-helpers';
 
 /**
  * Soft cost guard hook. Reads the running `total_cost_usd` from the
@@ -19,17 +20,15 @@ export function makeCostGuardHook(opts: {
 }): HookCallback {
   return async (input) => {
     if (input.hook_event_name !== 'Stop') return {};
-    const cost = (input as unknown as { total_cost_usd?: number })
-      .total_cost_usd;
-    const sessionId = (input as unknown as { session_id?: string }).session_id;
+    const stop = asStop(input);
     if (
-      typeof cost === 'number' &&
-      cost > opts.softBudgetUsd &&
-      typeof sessionId === 'string'
+      typeof stop.total_cost_usd === 'number' &&
+      stop.total_cost_usd > opts.softBudgetUsd &&
+      typeof stop.session_id === 'string'
     ) {
       opts.onSoftBudgetExceeded({
-        sessionId,
-        costSoFarUsd: cost,
+        sessionId: stop.session_id,
+        costSoFarUsd: stop.total_cost_usd,
         softBudgetUsd: opts.softBudgetUsd,
       });
     }

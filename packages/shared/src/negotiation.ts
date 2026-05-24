@@ -34,6 +34,22 @@ export const NegotiationOfferSchema = z.object({
 });
 export type NegotiationOffer = z.infer<typeof NegotiationOfferSchema>;
 
+/**
+ * Baseline derived from the source supplier's parsed quotation. Unlike
+ * a NegotiationOffer (which is always a complete offer made by an agent),
+ * a baseline may have null lead time or payment terms when the supplier's
+ * file did not include them. The brand prompt renders nulls explicitly
+ * as "(not specified by supplier)" so the agent can reason about the gap
+ * instead of negotiating against fake values.
+ */
+export const BaselineOfferSchema = z.object({
+  unitPriceAvg: z.number().nonnegative(),
+  leadTimeDays: z.number().int().nonnegative().nullable(),
+  paymentTermsDisplay: z.string().nullable(),
+  currency: CurrencySchema,
+});
+export type BaselineOffer = z.infer<typeof BaselineOfferSchema>;
+
 export const NegotiationMessageRoleSchema = z.enum([
   'brand',
   'supplier',

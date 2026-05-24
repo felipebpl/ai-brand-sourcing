@@ -2,6 +2,7 @@ import { eq, sql } from 'drizzle-orm';
 import type { ParserPort } from '../domain';
 import type { DB } from '../db';
 import { quotation } from '../db/schema';
+import { extractUserInstructionIntent } from '../infra/agent-sdk/adapters/intent-extractor.claude';
 import { persistParseResult, type PersistResult } from './persist';
 
 /**
@@ -145,6 +146,16 @@ export async function parseAndPersist(args: {
       error: err instanceof Error ? err.message : String(err),
     };
   }
+
+  // Best-effort intent extraction. Never blocks the parse pipeline —
+  // the brand prompt also receives the raw userInstruction text, so a
+  // missing intent just means the structured projection falls back to
+  // 'balanced'. Failures are logged inside the extractor.
+  const intent = await extractUserInstructionIntent(args.userInstruction);
+  await db
+    .update(quotation)
+    .set({ userInstructionIntent: intent, updatedAt: sql`now()` })
+    .where(eq(quotation.id, quotationId));
 
   return {
     kind: 'parsed',

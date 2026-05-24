@@ -345,7 +345,6 @@ function SupplierColumnHeader({
           isTerminal={isTerminal}
         />
         <span className="text-[10px] text-muted-foreground">
-          R{effectiveRounds(negotiation)} ·{' '}
           {formatRelative(negotiation.updatedAt)}
         </span>
       </div>

@@ -1,19 +1,20 @@
 /**
- * Parser subagent system prompt — inlined version of the
- * quotation-parser skill so the agent doesn't have to spend turns
- * Read-ing the SKILL.md file (which doubles the context window each
- * time it re-reads).
+ * Parser subagent system prompt — the full skill content lives inline
+ * here. The SDK's project-skills mechanism is NOT used (the adapter
+ * runs with `settingSources: []`), so the on-disk Markdown bundle
+ * under `apps/api/src/infra/agent-sdk/skills/quotation-parser/` is
+ * static reference material for humans, not loaded at runtime.
  *
- * The canonical Markdown skill bundle at
- * `apps/api/src/infra/agent-sdk/skills/quotation-parser/` remains the
- * source of truth — this string is generated to keep them in sync.
+ * The one runtime dependency on that bundle is `scripts/inspect_xlsx.py`,
+ * which the agent invokes via Bash in its orient step. That path is
+ * baked into this prompt (see "Orient" below) and must resolve under
+ * `cwd: workspaceRoot` to that script's actual location.
  *
- * Why inline vs. `skills: [...]`: the SDK's skills option works by
- * making the SKILL.md *available* in the filesystem and instructing
- * the agent to Read it. For a short, single-shot subagent the
- * additional turn cost (Read returns 250+ lines) is wasted; baking
- * the skill content into the system prompt removes that overhead
- * entirely and keeps the SDK's prompt-cache friendly (stable prefix).
+ * Why inline vs `settingSources: ['project']`: project-skills work by
+ * making the SKILL.md available on disk and telling the agent to Read
+ * it. For a short, single-shot subagent the additional turn cost
+ * (Read returns 250+ lines) is wasted; inlining the content keeps the
+ * SDK's prompt-cache friendly (stable prefix) and saves a turn per run.
  */
 export const PARSER_SUBAGENT_SYSTEM_PROMPT = `# Quotation Parser
 
@@ -53,11 +54,13 @@ Two things matter most:
 ### 1. Orient
 Before anything analytical, run:
 \`\`\`
-python3 .claude/skills/quotation-parser/scripts/inspect_xlsx.py <file_path>
+python3 apps/api/src/infra/agent-sdk/skills/quotation-parser/scripts/inspect_xlsx.py <file_path>
 \`\`\`
 You get sheet names, dims, merged-cell counts, dtype profile per column,
 number-format hints (currency), and a formula+value preview of rows
-1–25 of each sheet. One Bash call, ~80 lines of output.
+1–25 plus the last 10 rows of each sheet (with an elision marker in
+between for large files, so footer metadata like Payment Terms / Lead
+Time is never blind-spotted). One Bash call, ~80 lines of output.
 
 ### 2. Decide structure
 From the inspect output, answer:
@@ -199,6 +202,10 @@ The payload shape is:
 \`\`\`
 
 ## Hard rules
+- **Always communicate in English.** All reasoning, tool inputs,
+  matchReasoning fields, and ambiguity notes must be written in
+  English, regardless of the language of the spreadsheet itself or the
+  user's free-text instruction (which may arrive in any language).
 - **Submit exactly once.** Your turn ends immediately after submit_extraction.
 - **Don't invent SKUs.** Hallucinated matches poison negotiation.
 - **Don't re-read this prompt** — you have it in context.

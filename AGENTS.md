@@ -56,7 +56,7 @@ when its task calls for it.
 |---|---|
 | Monorepo shape (`apps/*`, `packages/*`) | Stable |
 | Runtime (Bun) + API (Hono) + DB (Postgres/Drizzle) | Stable |
-| Workflow (Inngest event-driven, 3 events) | Stable |
+| Workflow (Inngest event-driven, 2 handlers wired) | Stable |
 | Agent framework (Claude Agent SDK in `src/infra/agent-sdk/`) | Stable |
 | Domain layer (`src/domain/`) ports + types | Stable |
 | 8-table data model | Stable |
@@ -65,6 +65,7 @@ when its task calls for it.
 | Frontend (RFQs list, RFQ workspace, Orders, Ask Amber trace panel) | Stable |
 | Local-only execution (no app Docker) | Stable |
 | Authentication | **Out of scope** (hardcoded brand `valden`) |
+| Curveball flow | Intra-negotiation only — supplier-2 persona reveal mid-conversation. External post-recommendation `supplier.message` channel intentionally not wired (see `inngest/functions.ts`). |
 
 ## Operating rules for agents
 

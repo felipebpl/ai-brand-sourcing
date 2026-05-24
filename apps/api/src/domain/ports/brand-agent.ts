@@ -5,6 +5,7 @@ import type {
   UserInstructionIntent,
   BrandProfile,
   SupplierProfile,
+  BaselineOffer,
 } from '../types';
 
 /**
@@ -47,7 +48,7 @@ export interface BrandAgentNegotiateInput {
   userInstruction: string | null;
   intent: UserInstructionIntent;
   suppliers: SupplierProfile[];
-  baseline: NegotiationOffer;
+  baseline: BaselineOffer;
   /**
    * The bundle of items the brand is negotiating across all suppliers.
    * Each supplier gets the same list (information asymmetry is preserved

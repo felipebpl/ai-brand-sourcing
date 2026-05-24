@@ -1,6 +1,7 @@
 import { and, eq, sql } from 'drizzle-orm';
 import type { Recommendation } from '@app/shared';
 import type { DB } from '../db';
+import { rawRows } from '../db/raw';
 import {
   negotiation,
   negotiationMessage,
@@ -266,7 +267,8 @@ export async function materializePurchaseOrder(args: {
 async function reservePoNumber(db: DB): Promise<string> {
   const year = new Date().getUTCFullYear();
   const prefix = `PO-${year}-`;
-  const result = await db.execute<{ max_n: number | null }>(
+  const rows = await rawRows<{ max_n: number | null }>(
+    db,
     sql`
       SELECT MAX(
         NULLIF(
@@ -278,7 +280,6 @@ async function reservePoNumber(db: DB): Promise<string> {
       WHERE po_number LIKE ${prefix + '%'}
     `,
   );
-  const rows = (result as unknown as { rows: { max_n: number | null }[] }).rows;
   const next = (rows[0]?.max_n ?? 0) + 1;
   return `${prefix}${String(next).padStart(4, '0')}`;
 }

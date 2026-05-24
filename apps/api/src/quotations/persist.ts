@@ -26,50 +26,46 @@ import { product, quotation, quotationLine } from '../db/schema';
  *
  * Returns counters for the smoke harness and downstream telemetry.
  */
-export interface PersistResult {
-  quotationId: string;
-  lineCount: number;
-  ambiguityCount: number;
-  matchBreakdown: {
-    exact: number;
-    fuzzy: number;
-    uncertain: number;
-    unmatched: number;
-  };
-}
-
-export async function persistParseResult(args: {
-  db: DB;
-  quotationId: string;
-  extraction: QuotationExtraction;
-}): Promise<PersistResult> {
-  const { db, quotationId, extraction } = args;
-
-  // Catalog guard: any matched_sku the parser proposed must actually
-  // exist in `product.sku` (FK constraint). The parser's "agent_exact"
-  // path skips lookup_catalog when the raw SKU looks structurally clean,
-  // which fails when the supplier writes an incomplete SKU (e.g. pants
-  // without inseam: "AP004-GLW-28" vs catalog "AP004-GLW-28-24"). We
-  // verify every proposed match against the catalog, demote orphans
-  // to `agent_uncertain` so the negotiation can still proceed, and
-  // surface each demotion via `ambiguities[]` for the user.
-  const proposedSkus = Array.from(
+/**
+ * Catalog guard — pure helper. Extracted from `persistParseResult` so
+ * the demotion logic can be unit-tested without a live DB. Inputs:
+ *
+ *  - `extraction`: what the parser submitted.
+ *  - `validSkus`: the subset of `extraction.lines[].matchedSku` values
+ *    that actually exist in the `product` table.
+ *
+ * Returns the same `lines` array with orphans demoted to
+ * `agent_uncertain` (matched_sku and confidence nulled, reasoning
+ * prefixed), plus an extended `ambiguities` array carrying one entry per
+ * demoted SKU so the UI surfaces them, plus the list of demoted SKUs
+ * for audit (`catalogGuard.demoted`).
+ *
+ * The parser's "agent_exact" path skips lookup_catalog when the raw SKU
+ * looks structurally clean, which fails when the supplier writes an
+ * incomplete SKU (e.g. pants without inseam: "AP004-GLW-28" vs the
+ * catalog's "AP004-GLW-28-24"). This guard makes the FK constraint a
+ * safety net instead of a crash trigger.
+ */
+export function collectProposedSkus(
+  extraction: QuotationExtraction,
+): string[] {
+  return Array.from(
     new Set(
       extraction.lines
         .map((l) => l.matchedSku)
         .filter((s): s is string => typeof s === 'string' && s.length > 0),
     ),
   );
+}
 
-  const validSkus = new Set<string>();
-  if (proposedSkus.length > 0) {
-    const existing = await db
-      .select({ sku: product.sku })
-      .from(product)
-      .where(inArray(product.sku, proposedSkus));
-    for (const row of existing) validSkus.add(row.sku);
-  }
-
+export function applyCatalogGuard(
+  extraction: QuotationExtraction,
+  validSkus: ReadonlySet<string>,
+): {
+  guardedLines: QuotationExtraction['lines'];
+  guardedAmbiguities: QuotationExtraction['ambiguities'];
+  demotedSkus: string[];
+} {
   const demotedSkus: string[] = [];
   const guardedLines = extraction.lines.map((line) => {
     if (!line.matchedSku || validSkus.has(line.matchedSku)) return line;
@@ -94,6 +90,43 @@ export async function persistParseResult(args: {
         'Proposed match not found in catalog. The raw SKU likely needs more segments (e.g. pants take waist-inseam) or contains a typo; review the line.',
     })),
   ];
+
+  return { guardedLines, guardedAmbiguities, demotedSkus };
+}
+
+export interface PersistResult {
+  quotationId: string;
+  lineCount: number;
+  ambiguityCount: number;
+  matchBreakdown: {
+    exact: number;
+    fuzzy: number;
+    uncertain: number;
+    unmatched: number;
+  };
+}
+
+export async function persistParseResult(args: {
+  db: DB;
+  quotationId: string;
+  extraction: QuotationExtraction;
+}): Promise<PersistResult> {
+  const { db, quotationId, extraction } = args;
+
+  const proposedSkus = collectProposedSkus(extraction);
+  const validSkus = new Set<string>();
+  if (proposedSkus.length > 0) {
+    const existing = await db
+      .select({ sku: product.sku })
+      .from(product)
+      .where(inArray(product.sku, proposedSkus));
+    for (const row of existing) validSkus.add(row.sku);
+  }
+
+  const { guardedLines, guardedAmbiguities, demotedSkus } = applyCatalogGuard(
+    extraction,
+    validSkus,
+  );
 
   const lineRows = guardedLines.map((line) => ({
     quotationId,
