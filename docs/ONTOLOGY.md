@@ -47,12 +47,12 @@ once the brand agent decides — no separate `winner_selection` table.
 | id | uuid PK | |
 | brand_id | text | default `valden` |
 | source_supplier_id | fk → supplier | who sent it |
-| uploaded_filename | text | original filename |
-| storage_uri | text | path/url where the bytes live |
+| uploaded_filename | text \| null | original filename — null while the RFQ is `awaiting_quote` |
+| storage_uri | text \| null | path/url where the bytes live — null while the RFQ is `awaiting_quote` |
 | user_instruction | text \| null | free-form note from upload form |
 | user_instruction_intent | jsonb \| null | structured projection: `{ priority, constraints }` |
-| parsed_metadata | jsonb \| null | currency, lead time, payment terms, language, etc. |
-| status | enum | `uploaded` → `parsing` → `parsed` → `negotiating` → `recommended` → `committed` (or `cancelled`/`failed`) |
+| parsed_metadata | jsonb \| null | currency, lead time, payment terms, language, ambiguities, catalog-guard summary, etc. |
+| status | enum | `awaiting_quote` → `uploaded` → `parsing` → `parsed` → `negotiating` → `recommended` → `committed` (or `cancelled`/`failed`) |
 | recommended_negotiation_id | fk → negotiation \| null | the current winning negotiation |
 | recommendation_reasoning | text \| null | brand agent's natural-language justification |
 | recommendation_comparison | jsonb \| null | supplier × dimension comparison matrix |

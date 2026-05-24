@@ -112,6 +112,24 @@ Agent-first. Per `ADR-009`:
 A wrong match is worse than a missing match. The brand user reviews
 ambiguities in the UI before negotiation kicks off (if there are any).
 
+### Catalog guard at persistence (defense-in-depth)
+
+The parser's `agent_exact` rubric skips `lookup_catalog` when a raw SKU
+*looks* structurally clean (3-segment Valden shape), to save turns.
+That heuristic fails on category-shape variance — e.g. pants SKUs in
+the catalog carry 4 segments (`<prefix>-<color>-<waist>-<inseam>`); a
+supplier writing only the waist (`AP004-GLW-28`) trips the agent into
+proposing `matchedSku = rawSku` for a SKU that doesn't exist.
+
+`persistParseResult` (in `apps/api/src/quotations/persist.ts`) closes
+that hole **without** touching the agent: before the bulk insert it
+queries `product.sku` for every proposed `matchedSku`, demotes orphans
+to `matched_sku = null` + `matchMethod = 'agent_uncertain'`, and
+appends a clear entry to `ambiguities[]` (e.g. *"likely needs more
+segments — pants take waist-inseam — or contains a typo"*). The
+existing FK constraint becomes a safety net, not a crash. A single bad
+match no longer drops the whole batch.
+
 ## Hard caps
 
 ```typescript

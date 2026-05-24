@@ -25,12 +25,14 @@ current recommendation, swap winner, or renegotiate.
 ```
 ┌─────────────────┐         ┌────────────────────────────────────────────────┐
 │ apps/web (Vite) │  REST   │ apps/api (Hono on Bun)                         │
-│ React + shadcn  │ ──────▶ │  ├── POST /quotations    (upload)              │
-│ TanStack Query  │  SSE    │  ├── POST /supplier-messages (curveball UI)    │
-│                 │ ◀────── │  ├── POST /purchase-orders   (convert button)  │
-│                 │         │  ├── GET  /quotations/:id                      │
+│ React + shadcn  │ ──────▶ │  ├── POST /rfqs                (create empty)  │
+│ TanStack Query  │  SSE    │  ├── POST /quotations/:id/quote (attach file)  │
+│                 │ ◀────── │  ├── POST /quotations          (legacy upload) │
+│                 │         │  ├── POST /supplier-messages   (curveball UI)  │
+│                 │         │  ├── POST /purchase-orders     (convert button)│
+│                 │         │  ├── GET  /quotations · /quotations/:id        │
 │                 │         │  ├── GET  /quotations/:id/stream  (SSE)        │
-│                 │         │  ├── GET  /purchase-orders                     │
+│                 │         │  ├── GET  /purchase-orders · /:id              │
 │                 │         │  ├── /docs (Swagger), /openapi.json            │
 │                 │         │  └── /api/inngest (Inngest handler)            │
 └─────────────────┘         └─────────────────┬──────────────────────────────┘
@@ -122,18 +124,31 @@ content in the same event.
 
 ## Data flow: the happy path
 
-1. **Upload.** `POST /quotations` accepts a multipart file. The API saves
-   it under the configured storage path (local fs by default), inserts a
-   `quotation` row with status `uploaded`, and emits `quotation.uploaded`.
+1. **Create RFQ.** `POST /rfqs` inserts a `quotation` row with status
+   `awaiting_quote` — `uploaded_filename` and `storage_uri` are nullable
+   and stay null at this point. The UI navigates into the RFQ workspace
+   in awaiting-reply state. A starter `awaiting_quote` row is also
+   seeded by `bun db:seed` so the first demo run always has one ready.
 
-2. **Parse.** Brand agent boots, invokes parser agent via
+2. **Attach quote.** `POST /quotations/:id/quote` accepts a multipart
+   file + optional `userInstruction`, saves the bytes under the storage
+   path (local fs by default), updates the existing row to status
+   `uploaded`, and emits `quotation.uploaded`. (The legacy
+   `POST /quotations` route still creates + uploads in one step for
+   backward compatibility, but the canonical flow is create-then-attach.)
+
+3. **Parse.** Brand agent boots, invokes parser agent via
    `Agent('parser', filePath)`. Parser agent runs Python via Bash, reads
    the XLSX iteratively (using `openpyxl`), resolves raw SKUs via
    `lookup_catalog` tool, and calls `submit_extraction` to return a
-   typed `QuotationExtraction`. `quotation_line` rows persisted. Status
-   becomes `parsed`.
+   typed `QuotationExtraction`. `quotation_line` rows persisted via
+   `persistParseResult`, which applies a **catalog guard**: every
+   `matched_sku` is validated against `product.sku` before insert;
+   orphans are demoted to `agent_uncertain` + appended to `ambiguities[]`
+   so a single bad match never crashes the whole batch. Status becomes
+   `parsed`.
 
-3. **Negotiate.** Brand agent opens **3 negotiations** (one per supplier
+4. **Negotiate.** Brand agent opens **3 negotiations** (one per supplier
    from the challenge brief; the source supplier from the XLSX is
    renegotiable too). For each round: parallel
    `supplierAdapter.respond({ negotiationId, brandMessage, … })` calls
@@ -147,24 +162,25 @@ content in the same event.
    [NEGOTIATION.md](NEGOTIATION.md) for the loop detail and ADR-015
    for the "independent sessions vs subagent" choice.
 
-4. **Recommend.** Brand agent submits a `Recommendation` (single winner
+5. **Recommend.** Brand agent submits a `Recommendation` (single winner
    in this scope per the team's guidance — split-sourcing not modeled
    first-class but possible via the curveball replan flow). Comparison
    matrix + reasoning saved in `quotation`. Status becomes `recommended`.
 
-5. **Curveball (optional, can happen any time).** If a `supplier.message`
+6. **Curveball (optional, can happen any time).** If a `supplier.message`
    event arrives — at any point during the run, after recommendation,
    or even after PO if we wanted to model that — `handle.supplier-message`
    re-invokes the brand agent with the new context. Brand agent decides:
    keep / swap / renegotiate. Previous recommendation pushed into
    `quotation.recommendation_history`; new one becomes current.
 
-6. **Convert to PO.** User clicks "Convert to PO" → `POST /purchase-
-   orders` → emits `purchase-order.requested`. Handler reads the current
-   recommendation, materializes a `purchase_order` + `purchase_order_line`
-   rows (each line references the originating `quotation_line_id` for
-   end-to-end traceability). Status becomes `committed`. PO shows up in
-   the global PO list.
+7. **Convert to PO.** User clicks "Create Draft Order" → confirms in the
+   Place Order modal → `POST /purchase-orders` → emits
+   `purchase-order.requested`. Handler reads the current recommendation,
+   materializes a `purchase_order` + `purchase_order_line` rows (each
+   line references the originating `quotation_line_id` for end-to-end
+   traceability). Status becomes `committed`. PO shows up in the
+   `/orders` list and detail view.
 
 ## Why this shape
 

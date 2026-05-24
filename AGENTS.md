@@ -60,7 +60,9 @@ when its task calls for it.
 | Agent framework (Claude Agent SDK in `src/infra/agent-sdk/`) | Stable |
 | Domain layer (`src/domain/`) ports + types | Stable |
 | 8-table data model | Stable |
-| SKU matching (agent-first via `pg_trgm`) | Stable |
+| Quotation lifecycle (`awaiting_quote` → … → `committed`) | Stable — see ADR-016 |
+| SKU matching (agent-first via `pg_trgm`) + catalog guard at persistence | Stable — see ADR-016 |
+| Frontend (RFQs list, RFQ workspace, Orders, Ask Amber trace panel) | Stable |
 | Local-only execution (no app Docker) | Stable |
 | Authentication | **Out of scope** (hardcoded brand `valden`) |
 
