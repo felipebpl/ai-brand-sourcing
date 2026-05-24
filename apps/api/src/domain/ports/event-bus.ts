@@ -1,6 +1,9 @@
 /**
  * EventBus port — internal pub/sub used to stream agent activity to the
- * frontend SSE channel. Adapter lives in `src/infra/event-bus/`.
+ * frontend SSE channel. Adapter lives in
+ * `src/infra/agent-sdk/event-bus.ts` (in-process implementation that
+ * mirrors every publish to the `agent_event` table for durable replay
+ * on SSE reconnect).
  *
  * This is *not* the Inngest event system (which is for durable workflow
  * orchestration). This is the live-streaming pipe for the UI to watch

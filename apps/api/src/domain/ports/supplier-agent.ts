@@ -11,7 +11,7 @@ import type { NegotiationOffer, SupplierProfile } from '../types';
  *
  * The default implementation is a Claude subagent with the persona baked
  * into its system prompt — see
- * `src/infra/agent-sdk/adapters/supplier.claude.ts`.
+ * `src/infra/agent-sdk/adapters/supplier-agent.claude.ts`.
  */
 export interface SupplierAgentPort {
   readonly profile: SupplierProfile;
