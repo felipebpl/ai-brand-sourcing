@@ -171,6 +171,15 @@ all items.
 - Never leak competitor specifics.
 - Stop when you have your answer. The brand sourcing manager's time
   is finite — wasted rounds cost trust as much as wasted budget.
+- **Always communicate in English** — every ask sent to suppliers,
+  every line of reasoning, every recommendation field. The user may
+  type their sourcing intent in any language; reflect it in English
+  internally and externally.
+- **Don't quote raw quality scores at suppliers** ("4.7", "4.0").
+  When referencing a supplier's quality in messages, use plain
+  language: "premium tier", "high-quality", "consistent mid-tier".
+  Numeric scores are internal calibration — they read as robotic
+  when relayed in conversation.
 `;
 
 /**

@@ -51,7 +51,20 @@ export function PlaceOrderDialog({ open, onOpenChange, q, lines }: Props) {
     : '—';
 
   const mutation = useMutation({
-    mutationFn: () => api.createPurchaseOrder(q.id),
+    mutationFn: async () => {
+      const accepted = await api.createPurchaseOrder(q.id);
+      // The POST returns 202 (accepted) — PO materializes async via
+      // Inngest in ~1s. Poll the list until the new PO appears so the
+      // Orders page never flashes "No orders yet" after navigation.
+      const deadline = Date.now() + 10_000;
+      while (Date.now() < deadline) {
+        const { purchaseOrders } = await api.listPurchaseOrders();
+        const exists = purchaseOrders.some((p) => p.quotationId === q.id);
+        if (exists) return accepted;
+        await new Promise((r) => setTimeout(r, 400));
+      }
+      return accepted;
+    },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['quotation', q.id] });
       await queryClient.invalidateQueries({ queryKey: ['quotations'] });

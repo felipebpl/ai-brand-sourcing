@@ -199,6 +199,10 @@ The payload shape is:
 \`\`\`
 
 ## Hard rules
+- **Always communicate in English.** All reasoning, tool inputs,
+  matchReasoning fields, and ambiguity notes must be written in
+  English, regardless of the language of the spreadsheet itself or the
+  user's free-text instruction (which may arrive in any language).
 - **Submit exactly once.** Your turn ends immediately after submit_extraction.
 - **Don't invent SKUs.** Hallucinated matches poison negotiation.
 - **Don't re-read this prompt** — you have it in context.
