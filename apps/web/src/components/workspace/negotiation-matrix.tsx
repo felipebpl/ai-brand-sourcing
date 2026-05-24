@@ -80,10 +80,34 @@ export function NegotiationMatrix({
     return supplierMeta(n.supplierId).paymentTerms;
   };
 
-  const leadingByPriceId = negotiations
-    .map((n) => ({ id: n.id, price: supplierLatestUnit(n) }))
-    .filter((x) => x.price != null)
-    .sort((a, b) => (a.price ?? 0) - (b.price ?? 0))[0]?.id;
+  // Compute which negotiation is currently best on each comparable
+  // dimension. Multiple negotiations can lead on different dimensions
+  // simultaneously — the header chip surfaces every dimension the
+  // supplier is winning on so the UI doesn't silently favor one axis.
+  const candidatesWithPrice = negotiations
+    .map((n) => ({ id: n.id, value: supplierLatestUnit(n) }))
+    .filter((x): x is { id: string; value: number } => x.value != null);
+  const minPrice = candidatesWithPrice.length
+    ? Math.min(...candidatesWithPrice.map((x) => x.value))
+    : null;
+  const candidatesWithLead = negotiations
+    .map((n) => ({ id: n.id, value: supplierLatestLead(n) }))
+    .filter((x): x is { id: string; value: number } => x.value != null);
+  const minLead = candidatesWithLead.length
+    ? Math.min(...candidatesWithLead.map((x) => x.value))
+    : null;
+
+  const leadingDimensionsByNeg = new Map<string, string[]>();
+  for (const n of negotiations) {
+    const dims: string[] = [];
+    if (minPrice != null && supplierLatestUnit(n) === minPrice) {
+      dims.push('price');
+    }
+    if (minLead != null && supplierLatestLead(n) === minLead) {
+      dims.push('lead time');
+    }
+    if (dims.length > 0) leadingDimensionsByNeg.set(n.id, dims);
+  }
 
   return (
     <div className="overflow-x-auto rounded-xl border border-border bg-card">
@@ -110,9 +134,7 @@ export function NegotiationMatrix({
                   quotationId={quotationId}
                   negotiation={n}
                   isWinner={n.id === winnerNegotiationId}
-                  isLeading={
-                    n.id === leadingByPriceId && n.id !== winnerNegotiationId
-                  }
+                  leadingDimensions={leadingDimensionsByNeg.get(n.id) ?? []}
                   isTerminal={isTerminal}
                   supplierAccent={accentClasses(
                     supplierMeta(n.supplierId).accent,
@@ -138,7 +160,9 @@ export function NegotiationMatrix({
               {negotiations.map((n) => {
                 const offer = latestSupplierOffer(n);
                 const price = supplierLatestUnit(n);
-                const isLeader = n.id === leadingByPriceId && price != null;
+                const isLeader =
+                  price != null &&
+                  (leadingDimensionsByNeg.get(n.id) ?? []).includes('price');
                 const isWinner = n.id === winnerNegotiationId;
                 const d =
                   price != null
@@ -292,14 +316,14 @@ function LineItemCell({ line }: { line: QuotationLineRow }) {
 function SupplierColumnHeader({
   negotiation,
   isWinner,
-  isLeading,
+  leadingDimensions,
   isTerminal,
   supplierAccent,
 }: {
   quotationId: string;
   negotiation: NegotiationRow;
   isWinner: boolean;
-  isLeading: boolean;
+  leadingDimensions: string[];
   isTerminal: boolean;
   supplierAccent: ReturnType<typeof accentClasses>;
 }) {
@@ -349,9 +373,9 @@ function SupplierColumnHeader({
         </span>
       </div>
 
-      {isLeading && !isWinner && !isTerminal ? (
+      {leadingDimensions.length > 0 && !isWinner && !isTerminal ? (
         <div className="mt-2 text-[9.5px] font-semibold uppercase tracking-wider text-primary">
-          Leading on price
+          Leading on {leadingDimensions.join(' & ')}
         </div>
       ) : null}
 

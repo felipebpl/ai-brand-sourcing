@@ -34,7 +34,12 @@ export function PlaceOrderDialog({ open, onOpenChange, q, lines }: Props) {
   const winnerMeta = winner ? supplierMeta(winner.supplierId) : null;
   const accent = winnerMeta ? accentClasses(winnerMeta.accent) : null;
 
-  const totalUnits = lines.reduce((sum, l) => sum + l.minQty, 0);
+  // Only SKUs the parser matched against the catalog flow into the PO;
+  // `agent_uncertain` rows stay flagged for human review. Mirror that
+  // here so the dialog's product count and total units match what the
+  // PO will actually contain.
+  const committableLines = lines.filter((l) => l.matchedSku !== null);
+  const totalUnits = committableLines.reduce((sum, l) => sum + l.minQty, 0);
   const fobTotal = winner?.totalCost ?? 0;
   const estFreight = Math.round(fobTotal * 0.04 * 100) / 100;
   const estDuties = Math.round(fobTotal * 0.46 * 100) / 100;
@@ -56,6 +61,10 @@ export function PlaceOrderDialog({ open, onOpenChange, q, lines }: Props) {
       // The POST returns 202 (accepted) — PO materializes async via
       // Inngest in ~1s. Poll the list until the new PO appears so the
       // Orders page never flashes "No orders yet" after navigation.
+      // If the poll deadline passes without the PO showing up, the
+      // background materialization failed — throw so the user sees a
+      // real error instead of getting silently navigated to an empty
+      // Orders page.
       const deadline = Date.now() + 10_000;
       while (Date.now() < deadline) {
         const { purchaseOrders } = await api.listPurchaseOrders();
@@ -63,7 +72,11 @@ export function PlaceOrderDialog({ open, onOpenChange, q, lines }: Props) {
         if (exists) return accepted;
         await new Promise((r) => setTimeout(r, 400));
       }
-      return accepted;
+      throw new Error(
+        'Order is taking longer than expected to materialize. The ' +
+          'background job may have failed — check the Inngest dashboard ' +
+          'at http://localhost:8288 or try again.',
+      );
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['quotation', q.id] });
@@ -121,8 +134,8 @@ export function PlaceOrderDialog({ open, onOpenChange, q, lines }: Props) {
             <div className="space-y-px overflow-hidden rounded-lg border border-border">
               <DetailRow
                 label="Products"
-                value={`${lines.length} product${
-                  lines.length === 1 ? '' : 's'
+                value={`${committableLines.length} product${
+                  committableLines.length === 1 ? '' : 's'
                 } · ${totalUnits.toLocaleString()} units`}
               />
               <DetailRow label="Target Ship Date" value={targetShipDate} />

@@ -22,7 +22,14 @@ export function ConvertBar({ q, lines }: Props) {
   const meta = winner ? supplierMeta(winner.supplierId) : null;
   const accent = meta ? accentClasses(meta.accent) : null;
 
-  const totalUnits = lines.reduce((sum, l) => sum + l.minQty, 0);
+  // The bundle the brand negotiated (and that materializes into the PO)
+  // includes only SKUs the parser matched against the catalog —
+  // `agent_uncertain` rows are flagged for human review and do not
+  // travel through the negotiation or the purchase order. Show those
+  // same counts here so the number you see lines up with what the
+  // agent reasoned about and what will appear on the PO.
+  const committableLines = lines.filter((l) => l.matchedSku !== null);
+  const totalUnits = committableLines.reduce((sum, l) => sum + l.minQty, 0);
 
   return (
     <>
@@ -58,7 +65,7 @@ export function ConvertBar({ q, lines }: Props) {
               <div className="hidden flex-1 items-center gap-5 border-l border-border pl-5 md:flex">
                 <Metric
                   label="Products"
-                  value={`${lines.length} · ${totalUnits.toLocaleString()}u`}
+                  value={`${committableLines.length} · ${totalUnits.toLocaleString()}u`}
                 />
                 <Metric label="Lead" value={`${winner.leadTimeDays}d`} />
                 <Metric

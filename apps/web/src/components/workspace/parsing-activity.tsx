@@ -151,76 +151,101 @@ function buildSteps(
   lines: QuotationLineRow[],
   status: Props['status'],
 ): Step[] {
+  // The parser bounces between Bash, lookup_catalog, more Bash (e.g.
+  // to extract footer metadata), more lookup_catalog, etc. Looking at
+  // only the *latest* tool use makes the step indicator flicker
+  // backwards. Instead, derive each step from whether the parser has
+  // *ever* reached that phase — monotonic forward progression.
   const completed = events.some((e) => e.kind === 'parser.completed');
   const hasLines = lines.length > 0;
   const isParsing = status === 'parsing';
 
-  const latestToolHint = liveToolHint(events);
-  const isMatching = isMatchingSkus(events);
-  const isReading = isReadingWorkbook(events);
+  const everSawBashOrRead = events.some(isPreToolEvent('Bash', 'Read'));
+  const everSawLookup = events.some(
+    isPreToolEvent('mcp__parser__lookup_catalog'),
+  );
+  const everSawSubmit = events.some(
+    isPreToolEvent('mcp__parser__submit_extraction'),
+  );
 
+  // "Reading" advances to done the moment the parser starts matching
+  // SKUs (it has, by then, opened and read the workbook). "Matching"
+  // advances to done when lines land in the DB. "Handoff" lights up
+  // once the terminal submit_extraction has been called.
   const STATE: Record<string, StepState> = {
     received: 'done',
     opened: 'done',
-    reading: completed || hasLines ? 'done' : isParsing ? 'active' : 'pending',
-    matching: completed
+    reading:
+      completed || hasLines || everSawLookup
+        ? 'done'
+        : everSawBashOrRead || isParsing
+        ? 'active'
+        : 'pending',
+    matching: completed || hasLines
       ? 'done'
-      : hasLines || isMatching
+      : everSawLookup
       ? 'active'
       : 'pending',
-    handoff: completed ? 'done' : 'pending',
+    handoff: completed
+      ? 'done'
+      : hasLines || everSawSubmit
+      ? 'active'
+      : 'pending',
   };
 
   return STAGES.map((s) => ({
     key: s.key,
     label: s.label,
     detail:
-      s.key === 'reading' && STATE.reading === 'active' && isReading
-        ? latestToolHint
-        : s.key === 'matching' && STATE.matching === 'active' && !isReading
-        ? latestToolHint
+      STATE[s.key] === 'active'
+        ? activeStepHint(s.key, events)
         : undefined,
     state: STATE[s.key] ?? 'pending',
   }));
 }
 
-function liveToolHint(events: AgentEvent[]): string | undefined {
+/**
+ * Surface a contextual sub-text for whichever step is currently active.
+ * Uses the latest tool event to describe what's happening *right now*
+ * (e.g. "looking up MB013-0BS-XL" during matching), but only on the
+ * step that's actually active per the monotonic state machine — so the
+ * hint never appears next to a "done" or "pending" row.
+ */
+function activeStepHint(
+  stepKey: string,
+  events: AgentEvent[],
+): string | undefined {
   for (let i = events.length - 1; i >= 0; i--) {
     const e = events[i];
-    if (!e) continue;
-    if (e.kind !== 'brand.thinking') continue;
+    if (!e || e.kind !== 'brand.thinking') continue;
     const payload = e.payload as {
       phase?: string;
       toolName?: string;
       toolInput?: unknown;
     };
     if (payload.phase !== 'pre_tool_use') continue;
-    const hint = toolHint(payload.toolName ?? '', payload.toolInput);
-    if (hint) return hint;
+    const tool = payload.toolName ?? '';
+    const isFsTool = tool === 'Bash' || tool === 'Read';
+    const isLookup = tool === 'mcp__parser__lookup_catalog';
+    const isSubmit = tool === 'mcp__parser__submit_extraction';
+
+    if (stepKey === 'reading' && isFsTool)
+      return toolHint(tool, payload.toolInput);
+    if (stepKey === 'matching' && isLookup)
+      return toolHint(tool, payload.toolInput);
+    if (stepKey === 'handoff' && isSubmit)
+      return toolHint(tool, payload.toolInput);
   }
   return undefined;
 }
 
-function isMatchingSkus(events: AgentEvent[]): boolean {
-  for (let i = events.length - 1; i >= 0; i--) {
-    const e = events[i];
-    if (!e || e.kind !== 'brand.thinking') continue;
+function isPreToolEvent(...toolNames: string[]) {
+  return (e: AgentEvent): boolean => {
+    if (e.kind !== 'brand.thinking') return false;
     const payload = e.payload as { phase?: string; toolName?: string };
-    if (payload.phase !== 'pre_tool_use') continue;
-    return payload.toolName === 'mcp__parser__lookup_catalog';
-  }
-  return false;
-}
-
-function isReadingWorkbook(events: AgentEvent[]): boolean {
-  for (let i = events.length - 1; i >= 0; i--) {
-    const e = events[i];
-    if (!e || e.kind !== 'brand.thinking') continue;
-    const payload = e.payload as { phase?: string; toolName?: string };
-    if (payload.phase !== 'pre_tool_use') continue;
-    return payload.toolName === 'Bash' || payload.toolName === 'Read';
-  }
-  return false;
+    if (payload.phase !== 'pre_tool_use') return false;
+    return toolNames.includes(payload.toolName ?? '');
+  };
 }
 
 function toolHint(toolName: string, input: unknown): string | undefined {

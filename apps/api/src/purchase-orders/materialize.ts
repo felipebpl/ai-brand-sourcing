@@ -110,20 +110,27 @@ export async function materializePurchaseOrder(args: {
     };
   }
 
-  // Pull the winning supplier's most recent offer.
+  // Pull the final terms for this negotiation. The supplier's last
+  // message is usually the right place to look — but when the supplier
+  // closes with `intent='accept'` they don't repeat the offer payload
+  // (the supplier-agent adapter only persists `offer` for counter_offer
+  // intents). In that case the accepted terms are whatever was on the
+  // table just before the accept, which is the brand's prior structured
+  // ask. We walk back through the thread (any role) and take the most
+  // recent non-null offer — that's the last concrete terms anyone put
+  // down.
   const winningNegotiationId = q.recommendedNegotiationId;
-  const lastSupplierMessage = await db
-    .select()
+  const allMessages = await db
+    .select({
+      role: negotiationMessage.role,
+      turnIndex: negotiationMessage.turnIndex,
+      offer: negotiationMessage.offer,
+    })
     .from(negotiationMessage)
-    .where(
-      and(
-        eq(negotiationMessage.negotiationId, winningNegotiationId),
-        eq(negotiationMessage.role, 'supplier'),
-      ),
-    )
-    .orderBy(sql`turn_index desc`)
-    .limit(1);
-  const finalOffer = lastSupplierMessage[0]?.offer as
+    .where(eq(negotiationMessage.negotiationId, winningNegotiationId))
+    .orderBy(sql`turn_index desc`);
+  const offerRow = allMessages.find((m) => m.offer !== null);
+  const finalOffer = (offerRow?.offer ?? null) as
     | {
         unitPriceAvg: number;
         leadTimeDays: number;
@@ -132,13 +139,14 @@ export async function materializePurchaseOrder(args: {
         fulfillablePct?: number;
         notes?: string | null;
       }
-    | null
-    | undefined;
+    | null;
   if (!finalOffer) {
     return {
       kind: 'failed',
       reason: 'missing_final_offer',
-      detail: 'winning negotiation has no supplier offer to commit',
+      detail:
+        'winning negotiation has no structured offer in any message — ' +
+        'cannot derive PO terms',
     };
   }
 

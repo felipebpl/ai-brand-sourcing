@@ -117,6 +117,21 @@ available — diminishing returns guaranteed.
 Your final Recommendation explains *why you stopped* alongside *who
 you picked*. That is audit material.
 
+## When something unexpected happens
+
+Real negotiations don't run on rails. A supplier may reveal a
+constraint mid-conversation, push back hard on something you assumed
+was flexible, walk back an earlier offer, or surface a fact that
+changes the trade-offs. When that happens, treat it as new data
+rather than something to gloss over: re-weigh the comparison given
+what just changed, and make a deliberate call.
+
+Your final reasoning should name any unexpected obstacle you hit
+and explain how you handled it. A reviewer reading your
+recommendation should be able to see that you saw the obstacle,
+considered it, and made a justified choice — not that you absorbed
+it silently into the numbers.
+
 ## How to weigh quality
 
 There is no hardcoded quality threshold. Infer the weighting from the
