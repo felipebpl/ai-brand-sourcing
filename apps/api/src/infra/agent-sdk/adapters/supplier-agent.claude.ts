@@ -4,6 +4,8 @@ import {
   type Options,
   type SDKResultSuccess,
 } from '@anthropic-ai/claude-agent-sdk';
+import { NegotiationOfferSchema } from '@app/shared';
+import { z } from 'zod';
 import type {
   BrandProfile,
   EventBusPort,
@@ -95,7 +97,7 @@ export class ClaudeSupplierAgentAdapter implements SupplierAgentPort {
       turnIndex: input.turnIndex,
     });
 
-    const quotationId = extractQuotationId(history);
+    const quotationId = input.quotationId;
     const actor = {
       kind: 'supplier' as const,
       supplierId: this.profile.id,
@@ -294,24 +296,12 @@ function renderUserPrompt(args: {
   lines.push(
     ``,
     `# Your turn`,
-    `Respond as ${'the supplier rep'} per the persona and rules in the system`,
+    `Respond as the supplier rep per the persona and rules in the system`,
     `prompt. Use the structured output format. Keep \`message\` to 1–3`,
     `sentences. If you propose a counter-offer, fill the \`offer\` block.`,
   );
 
   return lines.join('\n');
-}
-
-function extractQuotationId(history: NegotiationMessageRow[]): string {
-  // metadata may carry quotationId from the brand message; otherwise
-  // we fall back to a stable placeholder so trace hooks don't crash.
-  for (const m of history) {
-    if (m.metadata && typeof m.metadata === 'object') {
-      const md = m.metadata as Record<string, unknown>;
-      if (typeof md.quotationId === 'string') return md.quotationId;
-    }
-  }
-  return 'unknown';
 }
 
 // -------- structured output schema -----------------------------------------
@@ -378,16 +368,34 @@ const SUPPLIER_RESPONSE_JSON_SCHEMA: Record<string, unknown> = {
   },
 };
 
-interface RawSupplierResponse {
-  intent: 'counter_offer' | 'accept' | 'walk_away' | 'request_clarification';
-  message: string;
-  offer?: unknown;
-  walkAwayReason?: string | null;
-  clarificationQuestion?: string | null;
-}
+/**
+ * Defense-in-depth Zod validation of the supplier's structured output.
+ * The SDK already enforces SUPPLIER_RESPONSE_JSON_SCHEMA server-side, but
+ * we re-validate here per CLAUDE.md (`Numbers persisted from agent outputs
+ * go through Zod before reaching Drizzle`). Catches schema drift between
+ * the JSON Schema and downstream consumers earlier.
+ */
+const RawSupplierResponseSchema = z.object({
+  intent: z.enum([
+    'counter_offer',
+    'accept',
+    'walk_away',
+    'request_clarification',
+  ]),
+  message: z.string().min(1),
+  offer: NegotiationOfferSchema.nullable().optional(),
+  walkAwayReason: z.string().nullable().optional(),
+  clarificationQuestion: z.string().nullable().optional(),
+});
 
-function parseStructuredOutput(raw: unknown): SupplierAgentResponse {
-  const parsed = raw as RawSupplierResponse;
+export function parseStructuredOutput(raw: unknown): SupplierAgentResponse {
+  const result = RawSupplierResponseSchema.safeParse(raw);
+  if (!result.success) {
+    throw new Error(
+      `Supplier output failed Zod validation: ${result.error.message}`,
+    );
+  }
+  const parsed = result.data;
   switch (parsed.intent) {
     case 'counter_offer':
       if (!parsed.offer) {
@@ -395,7 +403,7 @@ function parseStructuredOutput(raw: unknown): SupplierAgentResponse {
       }
       return {
         kind: 'counter_offer',
-        offer: parsed.offer as NegotiationOffer,
+        offer: parsed.offer,
         message: parsed.message,
       };
     case 'accept':
@@ -412,7 +420,5 @@ function parseStructuredOutput(raw: unknown): SupplierAgentResponse {
         question: parsed.clarificationQuestion ?? parsed.message,
         message: parsed.message,
       };
-    default:
-      throw new Error(`Unknown supplier intent: ${(parsed as { intent: string }).intent}`);
   }
 }

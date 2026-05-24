@@ -10,7 +10,6 @@ const EnvSchema = z.object({
   ANTHROPIC_API_KEY: z.string().min(1),
   INNGEST_EVENT_KEY: z.string().default('local'),
   INNGEST_SIGNING_KEY: z.string().default('local'),
-  VOYAGE_API_KEY: z.string().optional(),
   LANGFUSE_PUBLIC_KEY: z.string().optional(),
   LANGFUSE_SECRET_KEY: z.string().optional(),
   LANGFUSE_HOST: z.string().url().optional(),

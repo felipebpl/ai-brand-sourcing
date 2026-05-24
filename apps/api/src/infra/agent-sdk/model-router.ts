@@ -37,8 +37,6 @@ export function modelFor(tier: TaskTier): string {
  */
 export const TaskAssignment = {
   brandAgent: TaskTier.Strategic,
-  brandRecommendationFinal: TaskTier.Strategic,
-  brandReactToSupplierMessage: TaskTier.Strategic,
   parserAgent: TaskTier.Tactical,
   supplierAgent: TaskTier.Worker,
   userInstructionIntent: TaskTier.Worker,

@@ -86,9 +86,10 @@ and submits a typed `QuotationExtraction` via the terminal
 - Vision fallback as a primary path — defer to future iteration if
   text + Python proves insufficient (it should not for typical XLSX).
 
-**Hard caps:** `maxTurns: 20`, `maxBudgetUsd: 0.20`, `timeout: 60s` per
-file. Confidence < threshold OR oracle violation → flag in
-`ambiguities[]` for human review.
+**Hard caps:** `maxTurns: 25`, `maxBudgetUsd: 0.5` per file (ratified by
+ADR-014 after validation against the four sample quotations).
+Confidence < threshold OR oracle violation → flag in `ambiguities[]`
+for human review.
 
 ---
 

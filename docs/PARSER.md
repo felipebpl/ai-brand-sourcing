@@ -134,11 +134,14 @@ match no longer drops the whole batch.
 
 ```typescript
 const PARSER_LIMITS = {
-  maxTurns: 20,
-  maxBudgetUsd: 0.20,
-  timeout: 60_000,  // ms wall-clock
+  maxTurns: 25,
+  maxBudgetUsd: 0.5,
+  timeout: 60_000, // ms wall-clock
 };
 ```
+
+(ADR-014 ratified these after validating four real sample quotations;
+ADR-002's earlier tighter envelope was provisional.)
 
 Exceeding any cap = mark quotation `failed` with reason, surface in UI.
 

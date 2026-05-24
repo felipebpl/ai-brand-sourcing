@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, isNotNull, isNull, max, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, isNotNull, isNull, max } from 'drizzle-orm';
 import type {
   SessionKey,
   SessionStore,

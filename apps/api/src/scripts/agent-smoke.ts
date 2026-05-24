@@ -9,21 +9,24 @@ import {
   supplier,
 } from '../db/schema';
 import { eventBus } from '../infra/agent-sdk/event-bus';
-import { ClaudeBrandAgentAdapter } from '../infra/agent-sdk/adapters/brand-agent.claude';
 import { ClaudeParserAdapter } from '../infra/agent-sdk/adapters/parser.claude';
 import { ClaudeSupplierAgentAdapter } from '../infra/agent-sdk/adapters/supplier-agent.claude';
 import { parseAndPersist } from '../quotations/pipeline';
 import { runNegotiation } from '../negotiations/pipeline';
+import { runBootstrap, runPingParser } from './agent-smoke-helpers';
 
 /**
  * Agent SDK smoke harness.
  *
- *   bun run agent:smoke                    # bootstrap loopback (Step 1)
- *   bun run agent:smoke parser-ping        # brand → Agent(parser) placeholder (Step 2)
- *   bun run agent:smoke parse <file>       # parser subagent vs a real XLSX (Step 3)
+ *   bun run agent:smoke                    # brand bootstrap loopback (SDK config check)
+ *   bun run agent:smoke parser-ping        # brand → Agent(parser) wiring check
+ *   bun run agent:smoke parse <file>       # parser subagent vs a real XLSX
+ *   bun run agent:smoke negotiate-round    # one supplier turn vs a synthetic brand opener
+ *   bun run agent:smoke negotiate [id]     # full end-to-end negotiation pipeline
  *
  * Requires a real ANTHROPIC_API_KEY in .env. Validates the wiring end
- * to end, paying real Anthropic costs (~$0.02–0.10 per parse call).
+ * to end, paying real Anthropic costs (~$0.02–0.10 per parse call,
+ * ~$1–2 per full negotiate run).
  */
 const mode = process.argv[2] ?? 'bootstrap';
 const QUOTATION_ID = 'smoke-' + crypto.randomUUID();
@@ -130,15 +133,23 @@ if (mode === 'negotiate') {
   process.exit(0);
 }
 
-const adapter = new ClaudeBrandAgentAdapter({ db, eventBus });
-
 if (mode === 'parser-ping') {
   log('Invoking brand agent → parser subagent (Agent tool round-trip)...');
-  const result = await adapter.pingParser({ quotationId: QUOTATION_ID, brand });
+  const result = await runPingParser({
+    db,
+    eventBus,
+    quotationId: QUOTATION_ID,
+    brand,
+  });
   log('Parser ping result', result);
 } else {
   log('Booting brand agent (bootstrap loopback)...');
-  const result = await adapter.bootstrap({ quotationId: QUOTATION_ID, brand });
+  const result = await runBootstrap({
+    db,
+    eventBus,
+    quotationId: QUOTATION_ID,
+    brand,
+  });
   log('Bootstrap result', result);
 }
 
@@ -259,7 +270,8 @@ async function runNegotiateRound(supplierId: string): Promise<void> {
     process.exit(1);
   }
 
-  // Fabricate the brand opening message (the real brand agent will do this in Step 5).
+  // Fabricate a brand opening message so we can isolate one supplier turn —
+  // the real brand agent composes its own openers per the system prompt.
   const brandOpeningMessage = [
     `Hello — we are sourcing this bundle of ${quotedItems.length} SKUs.`,
     `We have a baseline price of $52.00 average unit price from another partner,`,
@@ -304,6 +316,7 @@ async function runNegotiateRound(supplierId: string): Promise<void> {
 
   log(`Invoking supplier agent ${supplierId}...`);
   const response = await supplierAdapter.respond({
+    quotationId: quotationRow.id,
     negotiationId,
     brandMessage: brandOpeningMessage,
     brandAsk: null,

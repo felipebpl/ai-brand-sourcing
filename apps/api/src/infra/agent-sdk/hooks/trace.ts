@@ -1,5 +1,6 @@
 import type { HookCallback } from '@anthropic-ai/claude-agent-sdk';
 import type { AgentActor, EventBusPort } from '../../../domain';
+import { asPostToolUse, asPreToolUse } from './_input-helpers';
 
 /**
  * Lifecycle trace hooks — forward selected SDK events to the in-process
@@ -33,18 +34,15 @@ export function makeTraceHooks(opts: {
   const sessionId = crypto.randomUUID();
 
   const PreToolUse: HookCallback = async (input) => {
-    const toolName =
-      (input as unknown as { tool_name?: string }).tool_name ?? 'unknown';
-    const toolInput =
-      (input as unknown as { tool_input?: unknown }).tool_input ?? null;
+    const evt = asPreToolUse(input);
     await eventBus.publish({
       id: crypto.randomUUID(),
       quotationId,
       kind: 'brand.thinking',
       payload: {
         phase: 'pre_tool_use',
-        toolName,
-        toolInput,
+        toolName: evt.tool_name ?? 'unknown',
+        toolInput: evt.tool_input ?? null,
         actor,
         sessionId,
       },
@@ -54,18 +52,15 @@ export function makeTraceHooks(opts: {
   };
 
   const PostToolUse: HookCallback = async (input) => {
-    const toolName =
-      (input as unknown as { tool_name?: string }).tool_name ?? 'unknown';
-    const toolResponse =
-      (input as unknown as { tool_response?: unknown }).tool_response ?? null;
+    const evt = asPostToolUse(input);
     await eventBus.publish({
       id: crypto.randomUUID(),
       quotationId,
       kind: 'brand.thinking',
       payload: {
         phase: 'post_tool_use',
-        toolName,
-        toolResponse,
+        toolName: evt.tool_name ?? 'unknown',
+        toolResponse: evt.tool_response ?? null,
         actor,
         sessionId,
       },

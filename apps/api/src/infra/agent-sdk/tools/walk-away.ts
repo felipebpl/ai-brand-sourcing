@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { tool } from '@anthropic-ai/claude-agent-sdk';
 import type { DB } from '../../../db';
 import { negotiation, negotiationMessage } from '../../../db/schema';
+import { rawRows } from '../../../db/raw';
 
 /**
  * `walk_away_from` MCP tool — brand agent explicitly closes a
@@ -59,10 +60,10 @@ export function makeWalkAwayTool(config: WalkAwayConfig) {
         })
         .where(eq(negotiation.id, negotiationId));
 
-      const next = await config.db.execute<{ max: number | null }>(
+      const rows = await rawRows<{ max: number | null }>(
+        config.db,
         sql`SELECT max(turn_index) AS max FROM negotiation_message WHERE negotiation_id = ${negotiationId}`,
       );
-      const rows = (next as unknown as { rows: { max: number | null }[] }).rows;
       const nextTurnIndex = (rows[0]?.max ?? -1) + 1;
 
       await config.db.insert(negotiationMessage).values({

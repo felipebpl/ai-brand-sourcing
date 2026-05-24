@@ -1,4 +1,5 @@
 import type { HookCallback } from '@anthropic-ai/claude-agent-sdk';
+import { asPostToolUse } from './_input-helpers';
 
 /**
  * PostToolUse hook that terminates the agent loop cleanly the moment
@@ -18,18 +19,13 @@ export function makeStopOnSubmitHook(opts: {
   terminalToolName: string;
 }): HookCallback {
   return async (input) => {
-    const evt = input as unknown as {
-      hook_event_name: string;
-      tool_name?: string;
-      tool_response?: { isError?: boolean };
-    };
-    if (evt.hook_event_name !== 'PostToolUse') return {};
+    if (input.hook_event_name !== 'PostToolUse') return {};
+    const evt = asPostToolUse(input);
     if (evt.tool_name !== opts.terminalToolName) return {};
     if (evt.tool_response?.isError) return {};
     return {
       continue: false,
-      systemMessage:
-        `Terminal tool ${opts.terminalToolName} succeeded — stopping loop.`,
+      systemMessage: `Terminal tool ${opts.terminalToolName} succeeded — stopping loop.`,
     };
   };
 }
