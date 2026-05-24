@@ -463,3 +463,39 @@ export const claudeSessionEntry = pgTable(
       .where(sql`entry_uuid IS NOT NULL`),
   }),
 );
+
+// -------- Agent execution trace --------------------------------------------
+
+/**
+ * Persisted SSE event log for the Ask Amber execution trace. Every event
+ * published to the in-process EventBus is also written here (fire-and-
+ * forget at publish time), so the trace survives browser refresh, tab
+ * close, and API restart. The SSE endpoint replays past rows for a
+ * quotation on connect before attaching to the live bus.
+ *
+ * `kind` mirrors the AgentEvent union in domain/ports/event-bus.ts.
+ * `payload` stores the full event payload as the bus saw it (actor,
+ * sessionId, tool details, text content, etc.). Indexed by
+ * (quotation_id, occurred_at) for O(log + N) replay scans.
+ */
+export const agentEvent = pgTable(
+  'agent_event',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    quotationId: uuid('quotation_id')
+      .references(() => quotation.id, { onDelete: 'cascade' })
+      .notNull(),
+    kind: text('kind').notNull(),
+    payload: jsonb('payload').notNull(),
+    occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    quotationOrderIdx: index('agent_event_quotation_order_idx').on(
+      table.quotationId,
+      table.occurredAt,
+    ),
+  }),
+);
