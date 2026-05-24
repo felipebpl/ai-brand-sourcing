@@ -7,6 +7,7 @@ import {
 } from '@app/shared';
 import { db } from '../db';
 import {
+  agentEvent,
   negotiation,
   negotiationMessage,
   quotation,
@@ -519,18 +520,73 @@ router.get('/quotations/:id/stream', (c) => {
   const id = c.req.param('id');
   return streamSSE(c, async (stream) => {
     let closed = false;
+    let replayDone = false;
+    const queued: Array<{ kind: string; data: string; id: string }> = [];
+
+    // Subscribe FIRST so events emitted during replay don't get lost.
+    // Until replayDone flips, incoming live events are buffered.
     const unsubscribe = eventBus.subscribe(id, async (event) => {
       if (closed) return;
+      const sse = {
+        kind: event.kind,
+        data: JSON.stringify(event),
+        id: event.id,
+      };
+      if (!replayDone) {
+        queued.push(sse);
+        return;
+      }
       try {
-        await stream.writeSSE({
-          event: event.kind,
-          data: JSON.stringify(event),
-          id: event.id,
-        });
+        await stream.writeSSE({ event: sse.kind, data: sse.data, id: sse.id });
       } catch {
         closed = true;
       }
     });
+
+    // Replay the durable trace for this RFQ ordered by occurredAt. The
+    // frontend dedupes by event.id, so any overlap with the live buffer
+    // is harmless.
+    try {
+      const past = await db
+        .select()
+        .from(agentEvent)
+        .where(eq(agentEvent.quotationId, id))
+        .orderBy(asc(agentEvent.occurredAt));
+      for (const row of past) {
+        if (closed) break;
+        const replayed = {
+          id: row.id,
+          quotationId: row.quotationId,
+          kind: row.kind,
+          payload: row.payload,
+          occurredAt: row.occurredAt.toISOString(),
+        };
+        try {
+          await stream.writeSSE({
+            event: row.kind,
+            data: JSON.stringify(replayed),
+            id: row.id,
+          });
+        } catch {
+          closed = true;
+          break;
+        }
+      }
+    } catch (err) {
+      console.error('[sse] replay failed for quotation', id, err);
+    }
+
+    // Flush whatever the bus buffered during replay.
+    replayDone = true;
+    while (queued.length > 0 && !closed) {
+      const sse = queued.shift()!;
+      try {
+        await stream.writeSSE({ event: sse.kind, data: sse.data, id: sse.id });
+      } catch {
+        closed = true;
+      }
+    }
+
     c.req.raw.signal?.addEventListener('abort', () => {
       closed = true;
       unsubscribe();

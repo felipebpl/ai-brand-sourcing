@@ -3,12 +3,21 @@ import { OpenAPIHono } from '@hono/zod-openapi';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
 import { serve } from 'inngest/hono';
+import { db } from './db';
+import {
+  attachAgentEventPersister,
+  makeDbAgentEventPersister,
+} from './infra/agent-sdk/event-bus';
 import { functions } from './inngest/functions';
 import { inngest } from './inngest/client';
 import { env } from './lib/env';
 import { healthRouter } from './routes/health';
 import { quotationsRouter } from './routes/quotations';
 import { purchaseOrdersRouter } from './routes/purchase-orders';
+
+// Persist every AgentEvent to the agent_event table so the Ask Amber
+// execution trace survives reload, browser close, and API restart.
+attachAgentEventPersister(makeDbAgentEventPersister(db));
 
 const app = new OpenAPIHono();
 
