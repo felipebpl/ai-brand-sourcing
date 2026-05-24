@@ -16,7 +16,13 @@ import type {
 } from '../../../domain';
 import type { DB } from '../../../db';
 import { modelFor, TaskAssignment } from '../model-router';
-import { makeCostGuardHook, makeTraceHooks } from '../hooks';
+import {
+  makeCostGuardHook,
+  makeTraceHooks,
+  publishAssistantText,
+  publishSessionCompleted,
+  publishSessionStarted,
+} from '../hooks';
 import { PgSessionStore } from '../session-store.pg';
 import { renderBrandAgentSystemPrompt } from '../prompts/brand-agent';
 import {
@@ -93,7 +99,7 @@ export class ClaudeBrandAgentAdapter implements BrandAgentPort {
       'modelInUse: <the model id you are running on> }`.',
     ].join('\n');
 
-    const options = this.makeBaseOptions({
+    const { options } = this.makeBaseOptions({
       quotationId: args.quotationId,
       systemPrompt,
       taskTier: TaskAssignment.brandAgent,
@@ -149,7 +155,7 @@ export class ClaudeBrandAgentAdapter implements BrandAgentPort {
       '`parserMessage` field.',
     ].join(' ');
 
-    const options = this.makeBaseOptions({
+    const { options } = this.makeBaseOptions({
       quotationId: args.quotationId,
       systemPrompt,
       taskTier: TaskAssignment.brandAgent,
@@ -251,7 +257,7 @@ export class ClaudeBrandAgentAdapter implements BrandAgentPort {
       negotiationIdBySupplier: this.negotiationIdBySupplier,
     });
 
-    const options = this.makeBaseOptions({
+    const { options, sessionId } = this.makeBaseOptions({
       quotationId: input.quotationId,
       systemPrompt: BRAND_AGENT_SYSTEM_PROMPT,
       taskTier: TaskAssignment.brandAgent,
@@ -267,12 +273,42 @@ export class ClaudeBrandAgentAdapter implements BrandAgentPort {
       disallowedTools: ['Bash', 'Read', 'Write', 'Edit', 'WebFetch', 'WebSearch', 'Agent', 'Glob', 'Grep'],
     });
 
+    const brandActor = { kind: 'brand' as const };
+    await publishSessionStarted({
+      quotationId: input.quotationId,
+      eventBus: this.eventBus,
+      actor: brandActor,
+      sessionId,
+      label: `Brand orchestrator · ${input.suppliers.length} suppliers`,
+    });
+
     let lastResult: SDKResultSuccess | undefined;
     for await (const message of query({ prompt: userPrompt, options })) {
+      await publishAssistantText({
+        quotationId: input.quotationId,
+        eventBus: this.eventBus,
+        actor: brandActor,
+        sessionId,
+        message,
+      });
       if (message.type === 'result' && message.subtype === 'success') {
         lastResult = message;
       }
     }
+
+    await publishSessionCompleted({
+      quotationId: input.quotationId,
+      eventBus: this.eventBus,
+      actor: brandActor,
+      sessionId,
+      result: lastResult
+        ? {
+            costUsd: lastResult.total_cost_usd,
+            durationMs: lastResult.duration_ms,
+            turns: lastResult.num_turns,
+          }
+        : { aborted: true },
+    });
 
     if (!captured) {
       throw new Error(
@@ -307,10 +343,11 @@ export class ClaudeBrandAgentAdapter implements BrandAgentPort {
     allowedTools?: string[];
     disallowedTools?: string[];
     mcpServers?: Record<string, McpSdkServerConfigWithInstance>;
-  }): Options {
+  }): { options: Options; sessionId: string } {
     const traceHooks = makeTraceHooks({
       quotationId: args.quotationId,
       eventBus: this.eventBus,
+      actor: { kind: 'brand' },
     });
     const costGuard = makeCostGuardHook({
       softBudgetUsd: this.softBudgetUsd,
@@ -345,7 +382,7 @@ export class ClaudeBrandAgentAdapter implements BrandAgentPort {
     if (args.outputSchema) {
       base.outputFormat = { type: 'json_schema', schema: args.outputSchema };
     }
-    return base as Options;
+    return { options: base as Options, sessionId: traceHooks.sessionId };
   }
 }
 

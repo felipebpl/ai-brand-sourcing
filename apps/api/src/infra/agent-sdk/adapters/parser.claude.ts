@@ -17,6 +17,9 @@ import {
   makeCostGuardHook,
   makeStopOnSubmitHook,
   makeTraceHooks,
+  publishAssistantText,
+  publishSessionCompleted,
+  publishSessionStarted,
 } from '../hooks';
 import { PgSessionStore } from '../session-store.pg';
 import { PARSER_SUBAGENT_SYSTEM_PROMPT } from '../prompts/parser-system';
@@ -82,10 +85,13 @@ export class ClaudeParserAdapter implements ParserPort {
     const mcpServer = makeParserMcpServer({ db: this.db, submitSink: sink });
     const filePath = resolveFilePath(this.workspaceRoot, input.storageUri);
 
+    const actor = { kind: 'parser' as const };
     const traceHooks = makeTraceHooks({
       quotationId: input.quotationId,
       eventBus: this.eventBus,
+      actor,
     });
+    const sessionId = traceHooks.sessionId;
     const costGuard = makeCostGuardHook({
       softBudgetUsd: this.softBudgetUsd,
       onSoftBudgetExceeded: (info) => {
@@ -157,12 +163,41 @@ export class ClaudeParserAdapter implements ParserPort {
       },
     };
 
+    await publishSessionStarted({
+      quotationId: input.quotationId,
+      eventBus: this.eventBus,
+      actor,
+      sessionId,
+      label: `Parsing ${input.uploadedFilename}`,
+    });
+
     let success: SDKResultSuccess | undefined;
     for await (const message of query({ prompt: userPrompt, options })) {
+      await publishAssistantText({
+        quotationId: input.quotationId,
+        eventBus: this.eventBus,
+        actor,
+        sessionId,
+        message,
+      });
       if (message.type === 'result' && message.subtype === 'success') {
         success = message;
       }
     }
+
+    await publishSessionCompleted({
+      quotationId: input.quotationId,
+      eventBus: this.eventBus,
+      actor,
+      sessionId,
+      result: success
+        ? {
+            costUsd: success.total_cost_usd,
+            durationMs: success.duration_ms,
+            turns: success.num_turns,
+          }
+        : { aborted: true },
+    });
 
     if (!success) {
       throw new Error('Parser run did not yield a success result');
