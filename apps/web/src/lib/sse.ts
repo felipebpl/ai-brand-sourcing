@@ -13,7 +13,15 @@ export type AgentEventKind =
   | 'brand.round_summary'
   | 'brand.recommendation_made'
   | 'recommendation.superseded'
+  | 'agent.text'
+  | 'agent.session_started'
+  | 'agent.session_completed'
   | 'po.issued';
+
+export type AgentActor =
+  | { kind: 'brand' }
+  | { kind: 'parser' }
+  | { kind: 'supplier'; supplierId: string };
 
 export type AgentEvent = {
   id: string;
@@ -33,6 +41,9 @@ const KINDS: AgentEventKind[] = [
   'brand.round_summary',
   'brand.recommendation_made',
   'recommendation.superseded',
+  'agent.text',
+  'agent.session_started',
+  'agent.session_completed',
   'po.issued',
 ];
 

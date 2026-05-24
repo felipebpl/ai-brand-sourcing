@@ -6,6 +6,11 @@
  * orchestration). This is the live-streaming pipe for the UI to watch
  * the agents think.
  */
+export type AgentActor =
+  | { kind: 'brand' }
+  | { kind: 'parser' }
+  | { kind: 'supplier'; supplierId: string };
+
 export interface AgentEvent {
   id: string;
   quotationId: string;
@@ -19,7 +24,16 @@ export interface AgentEvent {
     | 'brand.round_summary'
     | 'brand.recommendation_made'
     | 'recommendation.superseded'
+    | 'agent.text'
+    | 'agent.session_started'
+    | 'agent.session_completed'
     | 'po.issued';
+  /**
+   * When the event originates from an agent session (parser, brand,
+   * supplier), payload carries `actor: AgentActor` and `sessionId:
+   * string` so the UI can group + color-code by run. Domain-level
+   * events (po.issued, recommendation.*) may omit them.
+   */
   payload: Record<string, unknown>;
   occurredAt: string;
 }

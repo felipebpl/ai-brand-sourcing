@@ -1,3 +1,8 @@
 export { makeCostGuardHook } from './cost-guard';
-export { makeTraceHooks } from './trace';
+export {
+  makeTraceHooks,
+  publishAssistantText,
+  publishSessionStarted,
+  publishSessionCompleted,
+} from './trace';
 export { makeStopOnSubmitHook } from './stop-on-submit';

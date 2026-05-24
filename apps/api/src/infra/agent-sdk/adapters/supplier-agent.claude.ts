@@ -16,7 +16,13 @@ import type {
 import type { DB } from '../../../db';
 import { negotiationMessage } from '../../../db/schema';
 import { modelFor, TaskAssignment } from '../model-router';
-import { makeCostGuardHook, makeTraceHooks } from '../hooks';
+import {
+  makeCostGuardHook,
+  makeTraceHooks,
+  publishAssistantText,
+  publishSessionCompleted,
+  publishSessionStarted,
+} from '../hooks';
 import { PgSessionStore } from '../session-store.pg';
 import {
   renderSupplierRuntimeContext,
@@ -89,10 +95,17 @@ export class ClaudeSupplierAgentAdapter implements SupplierAgentPort {
       turnIndex: input.turnIndex,
     });
 
+    const quotationId = extractQuotationId(history);
+    const actor = {
+      kind: 'supplier' as const,
+      supplierId: this.profile.id,
+    };
     const traceHooks = makeTraceHooks({
       eventBus: this.eventBus,
-      quotationId: extractQuotationId(history),
+      quotationId,
+      actor,
     });
+    const sessionId = traceHooks.sessionId;
     const costGuard = makeCostGuardHook({
       softBudgetUsd: 0.1,
       onSoftBudgetExceeded: (info) => {
@@ -126,12 +139,41 @@ export class ClaudeSupplierAgentAdapter implements SupplierAgentPort {
       },
     };
 
+    await publishSessionStarted({
+      quotationId,
+      eventBus: this.eventBus,
+      actor,
+      sessionId,
+      label: `${this.profile.id} · round ${input.turnIndex + 1}`,
+    });
+
     let success: SDKResultSuccess | undefined;
     for await (const message of query({ prompt: userPrompt, options })) {
+      await publishAssistantText({
+        quotationId,
+        eventBus: this.eventBus,
+        actor,
+        sessionId,
+        message,
+      });
       if (message.type === 'result' && message.subtype === 'success') {
         success = message;
       }
     }
+
+    await publishSessionCompleted({
+      quotationId,
+      eventBus: this.eventBus,
+      actor,
+      sessionId,
+      result: success
+        ? {
+            costUsd: success.total_cost_usd,
+            durationMs: success.duration_ms,
+            turns: success.num_turns,
+          }
+        : { aborted: true },
+    });
 
     if (!success || !success.structured_output) {
       throw new Error(
