@@ -1,7 +1,7 @@
 import { resolve } from 'node:path';
 import { sql } from 'drizzle-orm';
 import { db } from './index';
-import { product, supplier } from './schema';
+import { product, quotation, supplier } from './schema';
 
 /**
  * Idempotent seed for local development.
@@ -193,7 +193,31 @@ async function main(): Promise<void> {
   const suppliersInserted = await seedSuppliers();
   console.log(`  ✓ inserted ${suppliersInserted} new suppliers`);
 
+  console.log('Starter RFQ:');
+  const starterRfqs = await seedStarterRfq();
+  console.log(`  ✓ ensured ${starterRfqs} awaiting-quote RFQ ready for the demo`);
+
   console.log('Done.');
+}
+
+async function seedStarterRfq(): Promise<number> {
+  const existing = await db
+    .select({ id: quotation.id })
+    .from(quotation)
+    .where(sql`${quotation.status} = 'awaiting_quote'`)
+    .limit(1);
+  if (existing.length > 0) return 0;
+  const inserted = await db
+    .insert(quotation)
+    .values({
+      brandId: 'valden',
+      sourceSupplierId: 'supplier-1',
+      uploadedFilename: null,
+      storageUri: null,
+      status: 'awaiting_quote',
+    })
+    .returning({ id: quotation.id });
+  return inserted.length;
 }
 
 await main();

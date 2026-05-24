@@ -414,6 +414,73 @@ curveball + audit events.
 
 ---
 
+## ADR-016 — RFQ as a first-class entity + catalog guard at persistence
+
+**Status:** Accepted.
+
+**Decision A — RFQ as entity.** A quotation row exists from the moment
+the brand creates the RFQ, not from the upload. The `quotation_status`
+enum gains `awaiting_quote` as its first value and as the table default;
+`uploaded_filename` and `storage_uri` become nullable. Two routes
+support the create-then-attach flow:
+
+- `POST /rfqs` inserts an empty `awaiting_quote` row, returns
+  `{quotationId}`.
+- `POST /quotations/:id/quote` (multipart `file` + optional
+  `userInstruction`) attaches the supplier's spreadsheet to an existing
+  awaiting RFQ, transitions it to `uploaded`, and fires the same
+  `quotation/uploaded` Inngest event the legacy upload route uses — so
+  the parser pipeline downstream is unchanged. Legacy
+  `POST /quotations` (create + upload in one step) stays for backward
+  compatibility but is not what the UI uses.
+
+`bun db:seed` ensures one `awaiting_quote` starter row exists so the
+first demo run on a fresh DB always lands on a ready RFQ.
+
+**Why:** matches Amber's product mental model (RFQs are created first,
+then suppliers respond), unblocks running many parallel test cases
+without juggling local state, and gives each test a stable persisted
+identity instead of a synthetic frontend draft.
+
+**Decision B — Catalog guard at persistence.** `persistParseResult`
+batch-validates every proposed `matched_sku` against `product.sku`
+before the `quotation_line` insert. Orphans are demoted to
+`matched_sku = null` + `matchMethod = 'agent_uncertain'`, original
+reasoning preserved behind a `catalog guard:` prefix, and a fresh
+entry appended to `parsed_metadata.ambiguities[]` so the user sees
+the line surfaced with an actionable note. A
+`parsed_metadata.catalogGuard = { proposed, valid, demoted[] }`
+summary is also stored for audit. `matchBreakdown` is recomputed
+post-demotion so analytics reflect what actually landed.
+
+**Why (over fixing the parser prompt instead):** the parser's rubric
+trades a turn for trust on "clean-looking" SKUs (3-segment shape).
+That heuristic is wrong for category-shape variance (e.g. pants in
+the catalog carry 4 segments — waist + inseam — and a supplier writing
+only the waist looks "clean" to the rubric). The FK constraint then
+rejected the entire batch and dropped 21 valid rows because of one
+orphan. A persistence-layer guard makes the FK a safety net instead
+of a crash trigger, with zero parser/prompt touch. Refining the
+prompt is still on the table (ADR-016 only ratifies the guard); when
+the prompt knows pants take 4 segments it can pre-emptively call
+`lookup_catalog`, at which point the guard simply observes zero
+demotions.
+
+**Implementation map:**
+
+- `apps/api/src/db/schema.ts` — enum value + nullable columns + default.
+- `packages/shared/src/quotation.ts` — Zod `QuotationStatusSchema`
+  mirrors the new enum.
+- `apps/api/src/routes/quotations.ts` — `POST /rfqs` and
+  `POST /quotations/:id/quote` next to the existing legacy route.
+- `apps/api/src/db/seed.ts` — `seedStarterRfq()` runs once per
+  `db:seed` if no `awaiting_quote` row exists.
+- `apps/api/src/quotations/persist.ts` — catalog guard before the
+  bulk insert; surfaces demotions via `ambiguities` and `catalogGuard`
+  metadata.
+
+---
+
 ## Standing conventions (not ADRs)
 
 - Conventional commits (`feat:`, `fix:`, `chore:`, …).

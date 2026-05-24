@@ -27,6 +27,97 @@ import { saveUpload } from '../storage/file-storage';
  */
 const router = new Hono();
 
+/**
+ * Create an empty RFQ awaiting a supplier quote. No file required.
+ * Returns the new quotation id. Use POST /quotations/:id/quote to
+ * attach the supplier's spreadsheet later, which kicks off parsing.
+ */
+router.post('/rfqs', async (c) => {
+  const sourceSupplierId = 'supplier-1';
+  const brandId = 'valden';
+
+  const inserted = await db
+    .insert(quotation)
+    .values({
+      brandId,
+      sourceSupplierId,
+      uploadedFilename: null,
+      storageUri: null,
+      status: 'awaiting_quote',
+    })
+    .returning({ id: quotation.id });
+  const quotationId = inserted[0]?.id;
+  if (!quotationId) {
+    return c.json({ error: 'failed to insert quotation row' }, 500);
+  }
+  return c.json({ quotationId, status: 'awaiting_quote' }, 201);
+});
+
+/**
+ * Attach a supplier's quotation file to an existing RFQ that's
+ * awaiting its quote. Transitions the quotation into 'uploaded' and
+ * fires the same Inngest event the legacy POST /quotations route
+ * does, so the parser pipeline downstream is unchanged.
+ */
+router.post('/quotations/:id/quote', async (c) => {
+  const id = c.req.param('id');
+  const existing = await db
+    .select()
+    .from(quotation)
+    .where(eq(quotation.id, id))
+    .limit(1);
+  const q = existing[0];
+  if (!q) return c.json({ error: 'rfq not found' }, 404);
+  if (q.status !== 'awaiting_quote') {
+    return c.json(
+      {
+        error: 'rfq already has a quote',
+        detail: `status is '${q.status}'; expected 'awaiting_quote'`,
+      },
+      409,
+    );
+  }
+
+  const form = await c.req.formData();
+  const file = form.get('file');
+  const userInstruction = form.get('userInstruction');
+  if (!file || !(file instanceof File)) {
+    return c.json({ error: 'multipart field "file" is required' }, 400);
+  }
+  const filename = file.name || 'upload.xlsx';
+  const bytes = await file.arrayBuffer();
+  const saved = await saveUpload({ filename, bytes });
+
+  const cleanInstruction =
+    typeof userInstruction === 'string' && userInstruction.length > 0
+      ? userInstruction
+      : null;
+
+  await db
+    .update(quotation)
+    .set({
+      uploadedFilename: saved.uploadedFilename,
+      storageUri: saved.storageUri,
+      userInstruction: cleanInstruction,
+      status: 'uploaded',
+    })
+    .where(eq(quotation.id, id));
+
+  await inngest.send({
+    name: 'quotation/uploaded',
+    data: {
+      quotationId: id,
+      brandId: q.brandId,
+      sourceSupplierId: q.sourceSupplierId,
+      storageUri: saved.storageUri,
+      uploadedFilename: saved.uploadedFilename,
+      userInstruction: cleanInstruction,
+    },
+  });
+
+  return c.json({ quotationId: id, status: 'uploaded' }, 200);
+});
+
 router.post('/quotations', async (c) => {
   const form = await c.req.formData();
   const file = form.get('file');

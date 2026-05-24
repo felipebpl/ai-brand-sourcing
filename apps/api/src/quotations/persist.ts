@@ -1,7 +1,7 @@
-import { eq, sql } from 'drizzle-orm';
+import { eq, inArray, sql } from 'drizzle-orm';
 import type { QuotationExtraction } from '@app/shared';
 import type { DB } from '../db';
-import { quotation, quotationLine } from '../db/schema';
+import { product, quotation, quotationLine } from '../db/schema';
 
 /**
  * Persist a parser-emitted `QuotationExtraction` to the database.
@@ -45,7 +45,57 @@ export async function persistParseResult(args: {
 }): Promise<PersistResult> {
   const { db, quotationId, extraction } = args;
 
-  const lineRows = extraction.lines.map((line) => ({
+  // Catalog guard: any matched_sku the parser proposed must actually
+  // exist in `product.sku` (FK constraint). The parser's "agent_exact"
+  // path skips lookup_catalog when the raw SKU looks structurally clean,
+  // which fails when the supplier writes an incomplete SKU (e.g. pants
+  // without inseam: "AP004-GLW-28" vs catalog "AP004-GLW-28-24"). We
+  // verify every proposed match against the catalog, demote orphans
+  // to `agent_uncertain` so the negotiation can still proceed, and
+  // surface each demotion via `ambiguities[]` for the user.
+  const proposedSkus = Array.from(
+    new Set(
+      extraction.lines
+        .map((l) => l.matchedSku)
+        .filter((s): s is string => typeof s === 'string' && s.length > 0),
+    ),
+  );
+
+  const validSkus = new Set<string>();
+  if (proposedSkus.length > 0) {
+    const existing = await db
+      .select({ sku: product.sku })
+      .from(product)
+      .where(inArray(product.sku, proposedSkus));
+    for (const row of existing) validSkus.add(row.sku);
+  }
+
+  const demotedSkus: string[] = [];
+  const guardedLines = extraction.lines.map((line) => {
+    if (!line.matchedSku || validSkus.has(line.matchedSku)) return line;
+    demotedSkus.push(line.matchedSku);
+    const note = `catalog guard: matched SKU '${line.matchedSku}' is not in the product catalog — demoted to uncertain`;
+    return {
+      ...line,
+      matchedSku: null,
+      matchConfidence: null,
+      matchMethod: 'agent_uncertain' as const,
+      matchReasoning: line.matchReasoning
+        ? `${note}. Prior reasoning: ${line.matchReasoning}`
+        : note,
+    };
+  });
+
+  const guardedAmbiguities = [
+    ...extraction.ambiguities,
+    ...demotedSkus.map((sku) => ({
+      where: `matched_sku '${sku}'`,
+      reason:
+        'Proposed match not found in catalog. The raw SKU likely needs more segments (e.g. pants take waist-inseam) or contains a typo; review the line.',
+    })),
+  ];
+
+  const lineRows = guardedLines.map((line) => ({
     quotationId,
     rawSku: line.rawSku,
     rawDescription: line.rawDescription,
@@ -62,7 +112,7 @@ export async function persistParseResult(args: {
     rawExtras: line.rawExtras as unknown,
   }));
 
-  const breakdown = extraction.lines.reduce(
+  const breakdown = guardedLines.reduce(
     (acc, l) => {
       if (l.matchMethod === 'agent_exact') acc.exact += 1;
       else if (l.matchMethod === 'agent_fuzzy_inferred') acc.fuzzy += 1;
@@ -81,8 +131,13 @@ export async function persistParseResult(args: {
     leadTimeDays: extraction.leadTimeDays,
     paymentTerms: extraction.paymentTerms,
     language: extraction.language,
-    ambiguities: extraction.ambiguities,
+    ambiguities: guardedAmbiguities,
     matchBreakdown: breakdown,
+    catalogGuard: {
+      proposed: proposedSkus.length,
+      valid: validSkus.size,
+      demoted: demotedSkus,
+    },
     persistedAt: new Date().toISOString(),
   };
 
@@ -108,7 +163,7 @@ export async function persistParseResult(args: {
   return {
     quotationId,
     lineCount: lineRows.length,
-    ambiguityCount: extraction.ambiguities.length,
+    ambiguityCount: guardedAmbiguities.length,
     matchBreakdown: breakdown,
   };
 }

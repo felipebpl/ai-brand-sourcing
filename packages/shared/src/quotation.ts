@@ -4,6 +4,7 @@ export const CurrencySchema = z.enum(['USD', 'BRL', 'EUR', 'CNY', 'GBP']);
 export type Currency = z.infer<typeof CurrencySchema>;
 
 export const QuotationStatusSchema = z.enum([
+  'awaiting_quote',
   'uploaded',
   'parsing',
   'parsed',

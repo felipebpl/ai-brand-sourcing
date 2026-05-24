@@ -34,6 +34,7 @@ import {
 // -------- Enums --------------------------------------------------------------
 
 export const quotationStatus = pgEnum('quotation_status', [
+  'awaiting_quote',
   'uploaded',
   'parsing',
   'parsed',
@@ -151,12 +152,12 @@ export const quotation = pgTable('quotation', {
   sourceSupplierId: text('source_supplier_id')
     .references(() => supplier.id)
     .notNull(),
-  uploadedFilename: text('uploaded_filename').notNull(),
-  storageUri: text('storage_uri').notNull(),
+  uploadedFilename: text('uploaded_filename'),
+  storageUri: text('storage_uri'),
   userInstruction: text('user_instruction'),
   userInstructionIntent: jsonb('user_instruction_intent'),
   parsedMetadata: jsonb('parsed_metadata'),
-  status: quotationStatus('status').notNull().default('uploaded'),
+  status: quotationStatus('status').notNull().default('awaiting_quote'),
 
   // Embedded current recommendation. Nullable until brand agent decides.
   recommendedNegotiationId: uuid('recommended_negotiation_id'),
